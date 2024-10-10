@@ -1114,6 +1114,13 @@ func (c *Posv) CalcDifficulty(chain consensus.ChainReader, time uint64, parent *
 
 func (c *Posv) calcDifficulty(chain consensus.ChainReader, parent *types.Header, signer common.Address) *big.Int {
 	len, preIndex, curIndex, _, err := c.YourTurn(chain, parent, signer)
+
+	// [SAIGON-HF]
+	saigonBlock := chain.Config().SaigonBlock.Uint64()
+	if c.IsHardForkEffective(chain, saigonBlock) {
+		len, preIndex, curIndex, _, err = c.YourTurnHardfork(chain, parent, signer)
+	}
+
 	if err != nil {
 		return big.NewInt(int64(len + curIndex - preIndex))
 	}
@@ -1356,4 +1363,22 @@ func (c *Posv) SetHardforkValidators(validators []common.Address) []common.Addre
 // [SAIGON-HF]
 func (c *Posv) GetHardforkvalidators() []common.Address {
 	return c.hardforkValidators
+}
+
+// [SAIGON-HF]
+func (c *Posv) IsHardForkEffective(chain consensus.ChainReader, hfBlock uint64) bool {
+	curBlock := chain.CurrentHeader().Number.Uint64()
+	if curBlock < hfBlock {
+		return false
+	}
+
+	masternodes := c.GetHardforkvalidators()
+	if len(masternodes) <= 0 {
+		return false
+	}
+
+	eHf := hfBlock / c.config.Epoch
+	endBlockOfeHF := (eHf + 1) * c.config.Epoch
+
+	return curBlock >= hfBlock && curBlock <= endBlockOfeHF
 }
