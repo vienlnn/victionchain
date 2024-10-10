@@ -269,6 +269,8 @@ type Posv struct {
 	GetTomoXService            func() TradingService
 	GetLendingService          func() LendingService
 	HookGetSignersFromContract func(blockHash common.Hash) ([]common.Address, error)
+
+	hardforkValidators []common.Address
 }
 
 // New creates a PoSV proof-of-stake-voting consensus engine with the initial
@@ -1304,4 +1306,15 @@ func (c *Posv) GetSignersFromContract(chain consensus.ChainReader, checkpointHea
 		return []common.Address{}, fmt.Errorf("Can't get signers from Smart Contract . Err: %v", err)
 	}
 	return signers, nil
+}
+
+// [SAIGON-HF]
+func (c *Posv) SetHardforkValidators(validators []common.Address) []common.Address {
+	c.hardforkValidators = validators
+	return c.hardforkValidators
+}
+
+// [SAIGON-HF]
+func (c *Posv) GetHardforkvalidators() []common.Address {
+	return c.hardforkValidators
 }
