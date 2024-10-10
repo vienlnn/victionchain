@@ -166,6 +166,11 @@ if [[ -z $MAXPEERS ]]; then
   MAXPEERS=25
 fi
 
+# [SAIGON-HF]
+if [[ -z $SAIGON]]; then
+  params="$params --saigon ${SAIGON}"
+fi
+
 # dump
 echo "dump: $IDENTITY $account $BOOTNODES"
 
