@@ -270,6 +270,7 @@ type Posv struct {
 	GetLendingService          func() LendingService
 	HookGetSignersFromContract func(blockHash common.Hash) ([]common.Address, error)
 
+	// [SAIGON-HF]
 	hardforkValidators []common.Address
 }
 
@@ -609,6 +610,44 @@ func (c *Posv) YourTurn(chain consensus.ChainReader, parent *types.Header, signe
 	if (preIndex+1)%len(masternodes) == curIndex {
 		return len(masternodes), preIndex, curIndex, true, nil
 	}
+	return len(masternodes), preIndex, curIndex, false, nil
+}
+
+// [SAIGON-HF] - fork YourTurn
+func (c *Posv) YourTurnHardfork(chain consensus.ChainReader, parent *types.Header, signer common.Address) (int, int, int, bool, error) {
+	masternodes := c.GetHardforkvalidators()
+	if len(masternodes) == 0 {
+		log.Warn("Masternodes must be better than 0")
+		return 0, -1, -1, false, errors.New("Masternodes not found")
+	}
+
+	snap, err := c.GetSnapshot(chain, parent)
+	if err != nil {
+		log.Warn("Failed when trying to commit new work", "err", err)
+		return 0, -1, -1, false, err
+	}
+
+	pre := common.Address{}
+	preIndex := -1
+
+	if parent.Number.Uint64() != 0 {
+		pre, err = whoIsCreator(snap, parent)
+		if err != nil {
+			return 0, 0, 0, false, err
+		}
+		preIndex = position(masternodes, pre)
+	}
+	curIndex := position(masternodes, signer)
+	if signer == c.signer {
+		log.Debug("Masternodes cycle info", "number of masternodes", len(masternodes), "previous", pre, "position", preIndex, "current", signer, "position", curIndex)
+	}
+	for i, s := range masternodes {
+		log.Debug("Masternode:", "index", i, "address", s.String())
+	}
+	if (preIndex+1)%len(masternodes) == curIndex {
+		return len(masternodes), preIndex, curIndex, true, nil
+	}
+
 	return len(masternodes), preIndex, curIndex, false, nil
 }
 
