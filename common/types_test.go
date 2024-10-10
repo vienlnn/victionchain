@@ -18,6 +18,7 @@ package common
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 	"testing"
@@ -157,4 +158,65 @@ func TestRemoveItemInArray(t *testing.T) {
 	if len(array) != 1 {
 		t.Error("fail remove item from array address")
 	}
+}
+
+func TestGetPen(t *testing.T) {
+	penHeaders := "0x255fca57249b5747e11be0b4fc9ad2d0ecfcda881c4006de9cb80bae42c8921933285b819f3bcf0a615ad0d8e40d709af9b015be131e4e81637208c3c7db2f9977488dca3a17ce3b83e417c03468dbf68cb1883564db887a1d2e52311bed01664f921c21"
+	ls := FromHex(penHeaders)
+	fmt.Println("-> ls", ls)
+	penlist := ExtractAddressFromBytes(ls)
+	for i := range penlist {
+		fmt.Println("-> pen", penlist[i].String())
+	}
+}
+
+const (
+	extraVanity = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
+	extraSeal   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
+)
+
+func TestGetM1s(t *testing.T) {
+	extra := "0xda8302040084746f6d6f89676f312e31382e31308664617277696e00000000008cb1883564db887a1d2e52311bed01664f921c21c7db2f9977488dca3a17ce3b83e417c03468dbf62c182a3dba2755fa630c3413d38d320ff1588b8d71da1c0977d305dd85fa290b6cba332c0d6f0e841c892f1029b592ffbfc0fb61f65f252439f7fa06f76162a601"
+	ls := FromHex(extra)
+	extraSuffix := len(ls) - extraSeal
+	fmt.Println("extraSuffix", extraSuffix)
+	masternodesFromCheckpointHeader := ExtractAddressFromBytes(ls[extraVanity:extraSuffix])
+	fmt.Println("masternodes", masternodesFromCheckpointHeader)
+	for i := range masternodesFromCheckpointHeader {
+		fmt.Println("M1", masternodesFromCheckpointHeader[i].String(), masternodesFromCheckpointHeader[i])
+	}
+}
+
+func TestVerifyCheckpoint(t *testing.T) {
+	signers := []Address{
+		HexToAddress("0x255fCa57249b5747e11Be0b4fC9Ad2D0eCFCDa88"),
+		HexToAddress("0x1c4006De9CB80BAe42c8921933285B819F3bCF0A"),
+		HexToAddress("0x118Db4a6718E79A8cA2A05A5def0e6AfeaAF24F4"),
+		HexToAddress("0x615ad0D8e40D709aF9B015BE131e4e81637208C3"),
+		HexToAddress("0x596571D3f8B5903d908A7BD6bB9e96BCdE691581"),
+		HexToAddress("0x322a8D78955774256A3174DB0ABB9cfc75211759"),
+		HexToAddress("0xcE55BF99666FBBA399260c53A05863F8Adc7b121"),
+		HexToAddress("0xC7db2f9977488DCa3A17cE3B83E417C03468DBf6"),
+		HexToAddress("0x8Cb1883564Db887A1D2e52311beD01664f921c21"),
+	}
+
+	//newSigners := make([]Address, len(signers))
+	//copy(newSigners, signers)
+
+	cmd := []Address{
+		HexToAddress("0x596571d3f8b5903d908a7bd6bb9e96bcde691581"),
+		HexToAddress("0x118db4a6718e79a8ca2a05a5def0e6afeaaf24f4"),
+		HexToAddress("0x322a8d78955774256a3174db0abb9cfc75211759"),
+		HexToAddress("0xce55bf99666fbba399260c53a05863f8adc7b121"),
+	}
+	pen := RemoveItemFromArray(signers, cmd)
+	for i := range pen {
+		fmt.Println("-> pen", pen[i].String())
+	}
+	for i := range signers {
+		fmt.Println("-> signers", signers[i].String())
+	}
+	//for i := range newSisigners {
+	//	fmt.Println("-> signers", newSigners[i].String())
+	//}
 }
