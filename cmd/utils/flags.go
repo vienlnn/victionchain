@@ -560,7 +560,36 @@ var (
 		Name:  "slave",
 		Usage: "Enable slave mode",
 	}
+	// [SAIGON-HF]
+	HardForkSaigonFlag = cli.StringFlag{
+		Name:  "saigon",
+		Usage: "Masternodes for saigon hardfork",
+	}
 )
+
+// [SAIGON-HF]
+func MakeHardForkListMasternodes(masternodes string) ([]common.Address, error) {
+	hashString := masternodes
+
+	// Remove square brackets and spaces
+	hashString = strings.Trim(hashString, "[]")
+	hashString = strings.ReplaceAll(hashString, " ", "")
+
+	// Split the string by commas
+	hashArray := strings.Split(hashString, ",")
+	if len(hashArray) == 0 {
+		return []common.Address{}, nil
+	}
+	// Output each element in the slice
+	result := make([]common.Address, 0, len(hashArray))
+	for _, hash := range hashArray {
+		if common.IsHexAddress(hash) {
+			fmt.Println("->", hash, common.HexToAddress(hash))
+			result = append(result, common.HexToAddress(hash))
+		}
+	}
+	return result, nil
+}
 
 // MakeDataDir retrieves the currently requested data directory, terminating
 // if none (or the empty string) is specified. If the node is starting a testnet,
@@ -1210,6 +1239,7 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
 }
 
 func MakeGenesis(ctx *cli.Context) *core.Genesis {
+	fmt.Println("-> make genesis")
 	var genesis *core.Genesis
 	switch {
 	case ctx.GlobalBool(TestnetFlag.Name):
@@ -1224,6 +1254,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 
 // MakeChain creates a chain manager from set command line flags.
 func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chainDb ethdb.Database) {
+	fmt.Println("-> make chain")
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
 
@@ -1260,7 +1291,10 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 		cache.TrieNodeLimit = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheGCFlag.Name) / 100
 	}
 	vmcfg := vm.Config{EnablePreimageRecording: ctx.GlobalBool(VMEnableDebugFlag.Name)}
+	fmt.Println("-> makechain", ctx.GlobalString(HardForkSaigonFlag.Name))
 	chain, err = core.NewBlockChain(chainDb, cache, config, engine, vmcfg)
+	fmt.Println("-> SAIGON", ctx.GlobalString((HardForkSaigonFlag.Name)))
+	// chain.SetHardForkValidators(ctx.GlobalString(HardForkSaigonFlag.Name))
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)
 	}

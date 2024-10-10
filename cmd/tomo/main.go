@@ -128,6 +128,7 @@ var (
 		utils.StoreRewardFlag,
 		utils.RollbackFlag,
 		utils.TomoSlaveModeFlag,
+		utils.HardForkSaigonFlag,
 	}
 
 	rpcFlags = []cli.Flag{
@@ -298,6 +299,14 @@ func startNode(ctx *cli.Context, stack *node.Node, cfg tomoConfig) {
 			started := false
 			slaveMode := ctx.GlobalIsSet(utils.TomoSlaveModeFlag.Name)
 			ok, err := ethereum.ValidateMasternode()
+			prepare, err := utils.MakeHardForkListMasternodes(ctx.GlobalString(utils.HardForkSaigonFlag.Name))
+			if err != nil {
+				log.Error("Cmd prepare masternodes for hardfork failed", "err", err)
+			}
+			fmt.Println("-> prepare", prepare)
+			hfValidators := ethereum.Engine().(*posv.Posv).SetHardforkValidators(prepare)
+			// hfValidators := ethereum.BlockChain().SetHardForkValidators(prepare)
+			log.Info("Set validators for hardfor block", "validators", hfValidators)
 			if err != nil {
 				utils.Fatalf("Can't verify masternode permission: %v", err)
 			}
