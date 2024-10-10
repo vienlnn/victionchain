@@ -333,11 +333,12 @@ func (c *ChainConfig) IsTIP2019(num *big.Int) bool {
 }
 
 func (c *ChainConfig) IsTIPSigning(num *big.Int) bool {
-	return isForked(common.TIPSigningBlock, num)
+	return isForked(c.TIPSigningBlock, num)
 }
 
 func (c *ChainConfig) IsTIPRandomize(num *big.Int) bool {
-	return isForked(common.TIPRandomizeBlock, num)
+	//return isForked(common.TIPRandomizeBlock, num)
+	return isForked(c.TIPRandomizeBlock, num)
 }
 
 func (c *ChainConfig) IsBlackListHF(num *big.Int) bool {
