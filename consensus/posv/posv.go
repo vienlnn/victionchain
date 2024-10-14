@@ -904,6 +904,7 @@ func (c *Posv) Prepare(chain consensus.ChainReader, header *types.Header) error 
 	}
 	// Set the correct difficulty
 	header.Difficulty = c.calcDifficulty(chain, parent, c.signer)
+
 	log.Debug("CalcDifficulty ", "number", header.Number, "difficulty", header.Difficulty)
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < extraVanity {
@@ -911,6 +912,9 @@ func (c *Posv) Prepare(chain consensus.ChainReader, header *types.Header) error 
 	}
 	header.Extra = header.Extra[:extraVanity]
 	masternodes := snap.GetSigners()
+	if c.IsHardForkEffective(chain, chain.Config().SaigonBlock.Uint64()) {
+		masternodes = c.GetHardforkvalidators()
+	}
 	if number >= c.config.Epoch && number%c.config.Epoch == 0 {
 		if c.HookPenalty != nil || c.HookPenaltyTIPSigning != nil {
 			var penMasternodes []common.Address = nil
@@ -1053,7 +1057,13 @@ func (c *Posv) Seal(chain consensus.ChainReader, block *types.Block, stop <-chan
 	if err != nil {
 		return nil, err
 	}
+
+	// [SAIGON-HF]
 	masternodes := c.GetMasternodes(chain, header)
+	if c.IsHardForkEffective(chain, chain.Config().SaigonBlock.Uint64()) {
+		masternodes = c.GetHardforkvalidators()
+	}
+
 	if _, authorized := snap.Signers[signer]; !authorized {
 		valid := false
 		for _, m := range masternodes {
@@ -1095,7 +1105,26 @@ func (c *Posv) Seal(chain consensus.ChainReader, block *types.Block, stop <-chan
 		return nil, err
 	}
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
+
+	if c.IsHardForkEffective(chain, chain.Config().SaigonBlock.Uint64()) {
+		m1Index, err := c.GetHardforkIndexMasternode(masternodes, common.Address{})
+		if err != nil {
+			return nil, fmt.Errorf("can't get block masternodes index")
+		}
+
+		validators, err := c.GetHardforkM2s(masternodes)
+		if err != nil {
+			return nil, fmt.Errorf("can't get validators")
+		}
+		m2 := validators[m1Index]
+		if m2 == signer {
+			header.Validator = sighash
+		}
+		return block.WithSeal(header), nil
+	}
+
 	m2, err := c.GetValidator(signer, chain, header)
+
 	if err != nil {
 		return nil, fmt.Errorf("can't get block validator: %v", err)
 	}
@@ -1381,4 +1410,42 @@ func (c *Posv) IsHardForkEffective(chain consensus.ChainReader, hfBlock uint64) 
 	endBlockOfeHF := (eHf + 1) * c.config.Epoch
 
 	return curBlock >= hfBlock && curBlock <= endBlockOfeHF
+}
+
+// [SAIGON-HF]
+func (c *Posv) GetHardforkM2s(masternodes []common.Address) ([]common.Address, error) {
+	n := len(masternodes)
+	if n < 2 {
+		return []common.Address{}, errors.New("Masternodes must be better than 2")
+	}
+
+	validators := make([]common.Address, n)
+	copy(validators, masternodes)
+
+	last := validators[n-1]
+	for i := n - 1; i > 0; i-- {
+		validators[i] = validators[i-1]
+	}
+	validators[0] = last
+
+	for i := 0; i < n; i++ {
+		if masternodes[i] == validators[i] {
+			return []common.Address{}, errors.New("M1 == M2 by index")
+		}
+	}
+	return validators, nil
+}
+
+// [SAIGON-HF]
+func (c *Posv) GetHardforkIndexMasternode(masternodes []common.Address, creator common.Address) (int, error) {
+	i := -1
+	for m, addr := range masternodes {
+		if addr == creator {
+			i = m
+		}
+	}
+	if i < 0 {
+		return -1, errors.New("Can't find creator from masternodes")
+	}
+	return i, nil
 }
