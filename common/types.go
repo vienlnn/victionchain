@@ -282,6 +282,38 @@ func RemoveItemFromArray(array []Address, items []Address) []Address {
 	return array
 }
 
+// Func merge masternodes from 2 array
+func MergeMasternodes(masternodes1 []Address, masternodes2 []Address) []Address {
+	if len(masternodes1) == 0 {
+		return masternodes2
+	}
+	if len(masternodes2) == 0 {
+		return masternodes1
+	}
+	// Create a map to track unique elements
+	elementMap := make(map[Address]bool)
+	// Create a slice to store the result
+	result := []Address{}
+
+	// Add elements from the first array to the map
+	for _, elem := range masternodes1 {
+		if _, exists := elementMap[elem]; !exists {
+			elementMap[elem] = true
+			result = append(result, elem)
+		}
+	}
+
+	// Add elements from the second array to the map
+	for _, elem := range masternodes2 {
+		if _, exists := elementMap[elem]; !exists {
+			elementMap[elem] = true
+			result = append(result, elem)
+		}
+	}
+
+	return result
+}
+
 // Extract validators from byte array.
 func ExtractAddressToBytes(penalties []Address) []byte {
 	data := []byte{}
