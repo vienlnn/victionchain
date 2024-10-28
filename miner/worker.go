@@ -296,6 +296,7 @@ func (self *worker) update() {
 			timeout.Reset(waitPeriod * time.Second)
 			// Handle ChainHeadEvent
 		case <-self.chainHeadCh:
+			log.Info("work:chainHeadCh", self.chainHeadCh)
 			self.commitNewWork()
 			timeout.Reset(waitPeriod * time.Second)
 
@@ -520,14 +521,21 @@ func (self *worker) commitNewWork() {
 
 	tstart := time.Now()
 	parent := self.chain.CurrentBlock()
+	log.Info("commitnewwork", "number", parent.Number(), "hash", parent.Hash().String(), "lastHash", self.lastParentBlockCommit)
 	var signers map[common.Address]struct{}
+	// [SAIGON-HF]
 	if parent.Hash().Hex() == self.lastParentBlockCommit {
+		log.Info("=> commit new work, break, return")
 		return
 	}
+	//if parent.Number().Uint64() != self.config.SaigonBlock.Uint64() && parent.Number().Uint64() != self.config.SaigonBlock.Uint64()-1 {
+	//
+	//}
+	//fmt.Println("worker.commitNewWork:1")
 	if !self.announceTxs && atomic.LoadInt32(&self.mining) == 0 {
 		return
 	}
-
+	//fmt.Println("-> worker.commitnewWork", atomic.LoadInt32(&self.mining))
 	// Only try to commit new work if we are mining
 	if atomic.LoadInt32(&self.mining) == 1 {
 		// check if we are right after parent's coinbase in the list
@@ -535,7 +543,20 @@ func (self *worker) commitNewWork() {
 		if self.config.Posv != nil {
 			// get masternodes set from latest checkpoint
 			c := self.engine.(*posv.Posv)
-			len, preIndex, curIndex, ok, err := c.YourTurn(self.chain, parent.Header(), self.coinbase)
+			len := 0
+			preIndex := -1
+			curIndex := -1
+			ok := false
+			err := fmt.Errorf("Get turn failed!")
+			log.Info("worker:levien=>", "effective", c.IsHardForkEffective(self.chain.CurrentHeader().Number.Uint64(), self.chain.Config().SaigonBlock.Uint64()), "config", self.chain.Config().SaigonBlock.Uint64(), "config", self.config.SaigonBlock.Uint64())
+			if c.IsHardForkEffective(self.chain.CurrentHeader().Number.Uint64(), self.chain.Config().SaigonBlock.Uint64()) {
+				log.Info("-> HF:worker:YourTurnHardfork")
+				len, preIndex, curIndex, ok, err = c.YourTurnHardfork(self.chain, parent.Header(), self.coinbase)
+			} else {
+				log.Info("-> HF:worker:YourTurn")
+				len, preIndex, curIndex, ok, err = c.YourTurn(self.chain, parent.Header(), self.coinbase)
+			}
+
 			if err != nil {
 				log.Warn("Failed when trying to commit new work", "err", err)
 				return
@@ -543,6 +564,11 @@ func (self *worker) commitNewWork() {
 			if !ok {
 				log.Info("Not my turn to commit block. Waiting...")
 				// in case some nodes are down
+				if c.IsHardForkEffective(self.chain.CurrentHeader().Number.Uint64(), self.config.SaigonBlock.Uint64()) {
+					preIndex = len - 1
+				}
+				log.Info("worker:turn", "len(masternodes)", len, "pre", preIndex, "cur", curIndex, "ok", ok, "err", err)
+
 				if preIndex == -1 {
 					// first block
 					return
@@ -622,6 +648,7 @@ func (self *worker) commitNewWork() {
 	if common.TIPSigningBlock.Cmp(header.Number) == 0 {
 		work.state.DeleteAddress(common.HexToAddress(common.BlockSigners))
 	}
+	// [SAIGON-HF]
 	if self.config.SaigonBlock != nil && self.config.SaigonBlock.Cmp(header.Number) == 0 && self.config.Posv != nil {
 		ecoSystemFund := new(big.Int).Mul(common.SaigonEcoSystemFund, new(big.Int).SetUint64(params.Ether))
 		work.state.AddBalance(self.config.Posv.FoudationWalletAddr, ecoSystemFund)
@@ -812,7 +839,7 @@ func (self *worker) commitNewWork() {
 		return
 	}
 	if atomic.LoadInt32(&self.mining) == 1 {
-		log.Info("Committing new block", "number", work.Block.Number(), "txs", work.tcount, "special-txs", len(specialTxs), "uncles", len(uncles), "elapsed", common.PrettyDuration(time.Since(tstart)))
+		log.Info("Committing new block", "number", work.Block.Number(), "txs", work.tcount, "special-txs", len(specialTxs), "uncles", len(uncles), "elapsed", common.PrettyDuration(time.Since(tstart)), "hash", work.Block.Hash().String(), "diff", work.Block.Difficulty().String())
 		self.unconfirmed.Shift(work.Block.NumberU64() - 1)
 		self.lastParentBlockCommit = parent.Hash().Hex()
 	}

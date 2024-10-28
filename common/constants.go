@@ -56,6 +56,7 @@ var (
 	TomoXBaseFee            = big.NewInt(10000)                              // 1 / TomoXBaseFee
 	TomoXBaseCancelFee      = new(big.Int).Mul(TomoXBaseFee, big.NewInt(10)) // 1/ (TomoXBaseFee *10)
 
+	// [SAIGON-HF]
 	SaigonRewardPerEpoch = big.NewInt(250)        // 250 VIC
 	SaigonEcoSystemFund  = big.NewInt(80_000_000) // 80M VIC
 

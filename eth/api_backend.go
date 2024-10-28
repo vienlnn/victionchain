@@ -322,7 +322,11 @@ func (b *EthApiBackend) GetVotersRewards(masternodeAddr common.Address) map[comm
 	if lastCheckpointNumber <= 0 || lastCheckpointNumber-rCheckpoint <= 0 || foundationWalletAddr == (common.Address{}) {
 		return nil
 	}
+	// [SAIGON-HF-1]
+	// chainReward := new(big.Int).Mul(new(big.Int).SetUint64(chain.Config().Posv.Reward), new(big.Int).SetUint64(params.Ether))
+	// chainReward = rewardInflation(chainReward, lastCheckpointNumber, common.BlocksPerYear)
 
+	// [SAIGON-HF]
 	// Get initial reward
 	initialRewardPerEpoch := new(big.Int).Mul(new(big.Int).SetUint64(chain.Config().Posv.Reward), new(big.Int).SetUint64(params.Ether))
 	chainReward := calcInitialReward(initialRewardPerEpoch, lastCheckpointNumber, common.BlocksPerYear)

@@ -262,11 +262,42 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 			if err != nil {
 				return block, false, fmt.Errorf("can't get block creator: %v", err)
 			}
-			m2, err := c.GetValidator(m1, eth.blockchain, block.Header())
-			if err != nil {
-				return block, false, fmt.Errorf("can't get block validator: %v", err)
+			m2 := common.Address{}
+			//fmt.Println("-> hook:currentheader", eth.blockchain.CurrentHeader().Number.Uint64())
+			//fmt.Println("-> hook:sg", eth.chainConfig.SaigonBlock.Uint64())
+			//log.Info("hook", "num", eth.blockchain.CurrentHeader().Number.Uint64(), "sg", eth.chainConfig.SaigonBlock.Uint64())
+			if c.IsHardForkEffective(block.Number().Uint64(), eth.chainConfig.SaigonBlock.Uint64()) {
+				fmt.Println("hook:HF")
+				m1s := c.GetHardforkvalidators()
+				for _, address := range m1s {
+					log.Info("hook:m1s", "m1", address)
+				}
+
+				iM1, err := c.GetHardforkIndexMasternode(m1s, m1)
+				log.Info("hook:im1", iM1)
+
+				if err != nil || iM1 < 0 {
+					return block, false, fmt.Errorf("invalid creator: %v - error: %v", m1.String(), err)
+				}
+				m2s, err := c.GetHardforkM2s(m1s)
+				if err != nil || len(m2s) == 0 || len(m2s) != len(m1s) {
+					return block, false, fmt.Errorf("invalid m2s: %v", err)
+				}
+				for _, address := range m2s {
+					log.Info("hook:m2s", "m2", address)
+				}
+
+				m2 = m2s[iM1]
+			} else {
+				m2, err = c.GetValidator(m1, eth.blockchain, block.Header())
+				if err != nil {
+					return block, false, fmt.Errorf("can't get block validator: %v", err)
+				}
 			}
+
+			log.Info("appendM2HeaderHook", "m2", m2.String())
 			if m2 == eb {
+				log.Info("appendM2HeaderHook m2 == eb", "m1", m1, "m2", m2)
 				wallet, err := eth.accountManager.Find(accounts.Account{Address: eb})
 				if err != nil {
 					log.Error("Can't find coinbase account wallet", "err", err)
@@ -279,6 +310,7 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 					return block, false, err
 				}
 				header.Validator = sighash
+				log.Info("appendM2HeaderHook:success m2 == eb", "m1", m1, "m2", m2, "sig", sighash)
 				return types.NewBlockWithHeader(header).WithBody(block.Transactions(), block.Uncles()), true, nil
 			}
 			return block, false, nil
@@ -349,9 +381,9 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 		c.HookPenaltyTIPSigning = func(chain consensus.ChainReader, header *types.Header, candidates []common.Address) ([]common.Address, error) {
 			prevEpoc := header.Number.Uint64() - chain.Config().Posv.Epoch
 			combackEpoch := uint64(0)
-			comebackLength := (common.LimitPenaltyEpoch + 1) * chain.Config().Posv.Epoch
-			if header.Number.Uint64() > comebackLength {
-				combackEpoch = header.Number.Uint64() - comebackLength
+			comebackLength := (common.LimitPenaltyEpoch + 1) * chain.Config().Posv.Epoch // 4500
+			if header.Number.Uint64() > comebackLength {                                 // 18000 > 4500
+				combackEpoch = header.Number.Uint64() - comebackLength // 5400 - 4500 = 900
 			}
 			if prevEpoc >= 0 {
 				start := time.Now()
@@ -515,6 +547,11 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 			rewards := make(map[string]interface{})
 			if number > 0 && number-rCheckpoint > 0 && foundationWalletAddr != (common.Address{}) {
 				start := time.Now()
+				// [SAIGON-HF-1]
+				// chainReward := new(big.Int).Mul(new(big.Int).SetUint64(chain.Config().Posv.Reward), new(big.Int).SetUint64(params.Ether))
+				// chainReward = rewardInflation(chainReward, number, common.BlocksPerYear)
+
+				// [SAIGON-HF]
 				// Get initial reward
 				initialRewardPerEpoch := new(big.Int).Mul(new(big.Int).SetUint64(chain.Config().Posv.Reward), new(big.Int).SetUint64(params.Ether))
 				chainReward := calcInitialReward(initialRewardPerEpoch, number, common.BlocksPerYear)
@@ -573,6 +610,86 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 				}
 			}
 			return nil
+		}
+
+		// [SAIGON-HF]
+		c.HookHardForkGetMasternodesRemaining = func(chain consensus.ChainReader, haltBlock uint64) ([]common.Address, error) {
+			hBlockNum := haltBlock
+			epoch := chain.Config().Posv.Epoch
+
+			cpEpoch := hBlockNum / epoch
+			cpBlock := hBlockNum / epoch * epoch
+			cpHeader := chain.GetHeaderByNumber(cpBlock)
+
+			ms := c.GetMasternodesFromCheckpointHeader(cpHeader, cpBlock, cpEpoch)
+
+			// slots := []common.Address{}
+			keys := make(map[common.Address]bool)
+
+			// can't create HF block
+			hfBlock := chain.GetHeaderByNumber(chain.Config().SaigonBlock.Uint64())
+			if hfBlock == nil {
+				return ms, nil
+			}
+
+			// HF block created -> who is creator
+			creator, err := c.RecoverSigner(hfBlock)
+			if err != nil {
+				return ms, errors.New("Can't recover creator for hardfork block")
+			}
+			// position of creator in ms
+			cPos := position(ms, creator)
+			if cPos < 0 {
+				return ms, errors.New("Invalid creator position")
+			}
+			// from HF -> halt
+			r := hBlockNum - chain.Config().SaigonBlock.Uint64()
+			creators := []common.Address{}
+			if r == 0 {
+				keys[creator] = true
+				creators = append(creators, creator)
+				log.Info("Creator of block", "number", hfBlock.Number, "hash", hfBlock.Hash().String(), "creator", creator.String())
+				return creators, nil
+			}
+			if r > 0 {
+				for i := chain.Config().SaigonBlock.Uint64(); i < hBlockNum; i++ {
+					header := chain.GetHeaderByNumber(i)
+					creator, err := c.RecoverSigner(header)
+					if err != nil {
+						log.Warn("Can't get creator of block", "number", i, "header", header.Hash().String())
+					}
+					if _, val := keys[creator]; !val {
+						keys[creator] = true
+						creators = append(creators, creator)
+						log.Info("Creator of block", "number", header.Number, "hash", header.Hash().String(), "creator", creator.String())
+					}
+				}
+				// slots = common.RemoveItemFromArray(ms, creators)
+			}
+			// totalBlockRemaining := epoch - hBlockNum%epoch
+			return creators, nil
+		}
+
+		// [SAIGON-HF]
+		c.HookHardForkGetMasternodesPenalties = func(chain consensus.ChainReader, validMasternodes []common.Address, cmdMasternodes []common.Address) ([]common.Address, error) {
+			epoch := chain.Config().Posv.Epoch
+			hfBlock := chain.Config().SaigonBlock.Uint64()
+
+			cpEpoch := hfBlock / epoch
+			cpBlock := cpEpoch * epoch
+			cpHeader := chain.GetHeaderByNumber(cpBlock)
+
+			ms := c.GetMasternodesFromCheckpointHeader(cpHeader, cpBlock, cpEpoch)
+
+			bans := common.RemoveItemFromArray(ms, validMasternodes)
+			for _, v := range bans {
+				log.Info("HookHardForkGetMasternodesPenalties:before", "pan", v.String())
+			}
+			bans = common.RemoveItemFromArray(bans, cmdMasternodes)
+			for _, v := range bans {
+				log.Info("HookHardForkGetMasternodesPenalties:after", "pan", v.String())
+			}
+			return bans, nil
 		}
 
 		eth.txPool.IsSigner = func(address common.Address) bool {
@@ -906,6 +1023,7 @@ func GetValidators(bc *core.BlockChain, masternodes []common.Address) ([]byte, e
 	return nil, core.ErrNotFoundM1
 }
 
+// [SAIGON-HF]
 func calcInitialReward(rewardPerEpoch *big.Int, number uint64, blockPerYear uint64) *big.Int {
 	// Stop reward from 8th year onwards
 	if blockPerYear*8 <= number {
@@ -920,6 +1038,7 @@ func calcInitialReward(rewardPerEpoch *big.Int, number uint64, blockPerYear uint
 	return new(big.Int).Set(rewardPerEpoch)
 }
 
+// [SAIGON-HF]
 func calcSaigonReward(rewardPerEpoch *big.Int, saigonBlock *big.Int, number uint64, blockPerYear uint64) *big.Int {
 	headBlock := new(big.Int).SetUint64(number)
 	yearsFromHardfork := new(big.Int).Div(new(big.Int).Sub(headBlock, saigonBlock), new(big.Int).SetUint64(blockPerYear))
@@ -951,4 +1070,13 @@ func (s *Ethereum) GetTomoXLending() *tomoxlending.Lending {
 // LendingPool geth eth lending pool
 func (s *Ethereum) LendingPool() *core.LendingPool {
 	return s.lendingPool
+}
+
+func position(list []common.Address, x common.Address) int {
+	for i, item := range list {
+		if item == x {
+			return i
+		}
+	}
+	return -1
 }

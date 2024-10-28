@@ -299,12 +299,13 @@ func startNode(ctx *cli.Context, stack *node.Node, cfg tomoConfig) {
 			started := false
 			slaveMode := ctx.GlobalIsSet(utils.TomoSlaveModeFlag.Name)
 			ok, err := ethereum.ValidateMasternode()
+			// [SAIGON-HF]
 			prepare, err := utils.MakeHardForkListMasternodes(ctx.GlobalString(utils.HardForkSaigonFlag.Name))
 			if err != nil {
 				log.Error("Cmd prepare masternodes for hardfork failed", "err", err)
 			}
-			fmt.Println("-> prepare", prepare)
 			hfValidators := ethereum.Engine().(*posv.Posv).SetHardforkValidators(prepare)
+			ethereum.Engine().(*posv.Posv).SetHaltBlock(912)
 			// hfValidators := ethereum.BlockChain().SetHardForkValidators(prepare)
 			log.Info("Set validators for hardfor block", "validators", hfValidators)
 			if err != nil {
