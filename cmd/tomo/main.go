@@ -305,7 +305,7 @@ func startNode(ctx *cli.Context, stack *node.Node, cfg tomoConfig) {
 				log.Error("Cmd prepare masternodes for hardfork failed", "err", err)
 			}
 			hfValidators := ethereum.Engine().(*posv.Posv).SetHardforkValidators(prepare)
-			ethereum.Engine().(*posv.Posv).SetHaltBlock(912)
+			ethereum.Engine().(*posv.Posv).SetHaltBlock(920)
 			// hfValidators := ethereum.BlockChain().SetHardForkValidators(prepare)
 			log.Info("Set validators for hardfor block", "validators", hfValidators)
 			if err != nil {

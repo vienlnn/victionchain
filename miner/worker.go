@@ -524,10 +524,15 @@ func (self *worker) commitNewWork() {
 	log.Info("commitnewwork", "number", parent.Number(), "hash", parent.Hash().String(), "lastHash", self.lastParentBlockCommit)
 	var signers map[common.Address]struct{}
 	// [SAIGON-HF]
+
 	if parent.Hash().Hex() == self.lastParentBlockCommit {
 		log.Info("=> commit new work, break, return")
 		return
 	}
+
+	//901 ->  build - restart ( - add peer
+	//
+
 	//if parent.Number().Uint64() != self.config.SaigonBlock.Uint64() && parent.Number().Uint64() != self.config.SaigonBlock.Uint64()-1 {
 	//
 	//}
