@@ -32,17 +32,18 @@ import (
 )
 
 const (
-	LegacyTxType = 0x00
+	LegacyTxType     = 0x00
+	DynamicFeeTxType = 0x02
 )
 
 //go:generate gencodec -type txdata -field-override txdataMarshaling -out gen_tx_json.go
 
 var (
-	ErrInvalidSig           = errors.New("invalid transaction v, r, s values")
-	ErrUnexpectedProtection = errors.New("transaction type does not supported EIP-155 protected signatures")
-	ErrShortTypedTx         = errors.New("typed transaction too short")
-	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
-
+	ErrInvalidSig               = errors.New("invalid transaction v, r, s values")
+	ErrUnexpectedProtection     = errors.New("transaction type does not supported EIP-155 protected signatures")
+	ErrShortTypedTx             = errors.New("typed transaction too short")
+	ErrTxTypeNotSupported       = errors.New("transaction type not supported")
+	ErrGasFeeCapTooLow          = errors.New("fee cap less than base fee")
 	skipNonceDestinationAddress = map[string]bool{
 		common.TomoXAddr:                         true,
 		common.TradingStateAddr:                  true,
@@ -85,6 +86,11 @@ type TxData interface {
 
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(chainID, v, r, s *big.Int)
+
+	// eip-1559
+	gasTipCap() *big.Int
+	gasFeeCap() *big.Int
+	effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int
 
 	encode(*bytes.Buffer) error
 	decode([]byte) error
@@ -150,6 +156,12 @@ func (tx *Transaction) GasPrice() *big.Int {
 	return tx.inner.gasPrice()
 }
 
+// GasTipCap returns the gasTipCap per gas of the transaction.
+func (tx *Transaction) GasTipCap() *big.Int { return new(big.Int).Set(tx.inner.gasTipCap()) }
+
+// GasFeeCap returns the fee cap per gas of the transaction.
+func (tx *Transaction) GasFeeCap() *big.Int { return new(big.Int).Set(tx.inner.gasFeeCap()) }
+
 // Value returns amount native coin of transaction
 func (tx *Transaction) Value() *big.Int {
 	return tx.inner.value()
@@ -202,6 +214,70 @@ func (tx *Transaction) TRC21Cost() *big.Int {
 // return R, S, V signature values of transaction
 func (tx *Transaction) RawSignatureValues() (v, r, s *big.Int) {
 	return tx.inner.rawSignatureValues()
+}
+
+// GasFeeCapCmp compares the fee cap of two transactions.
+func (tx *Transaction) GasFeeCapCmp(other *Transaction) int {
+	return tx.inner.gasFeeCap().Cmp(other.inner.gasFeeCap())
+}
+
+// GasFeeCapIntCmp compares the fee cap of the transaction against the given fee cap.
+func (tx *Transaction) GasFeeCapIntCmp(other *big.Int) int {
+	return tx.inner.gasFeeCap().Cmp(other)
+}
+
+// GasTipCapCmp compares the gasTipCap of two transactions.
+func (tx *Transaction) GasTipCapCmp(other *Transaction) int {
+	return tx.inner.gasTipCap().Cmp(other.inner.gasTipCap())
+}
+
+// GasTipCapIntCmp compares the gasTipCap of the transaction against the given gasTipCap.
+func (tx *Transaction) GasTipCapIntCmp(other *big.Int) int {
+	return tx.inner.gasTipCap().Cmp(other)
+}
+
+// EffectiveGasTip returns the effective miner gasTipCap for the given base fee.
+// Note: if the effective gasTipCap is negative, this method returns both error
+// the actual negative value, _and_ ErrGasFeeCapTooLow
+func (tx *Transaction) EffectiveGasTip(baseFee *big.Int) (*big.Int, error) {
+	if baseFee == nil {
+		return tx.GasTipCap(), nil
+	}
+	var err error
+	gasFeeCap := tx.GasFeeCap()
+	if gasFeeCap.Cmp(baseFee) < 0 {
+		err = ErrGasFeeCapTooLow
+	}
+	gasFeeCap = gasFeeCap.Sub(gasFeeCap, baseFee)
+
+	gasTipCap := tx.GasTipCap()
+	if gasTipCap.Cmp(gasFeeCap) < 0 {
+		return gasTipCap, err
+	}
+	return gasFeeCap, err
+}
+
+// EffectiveGasTipValue is identical to EffectiveGasTip, but does not return an
+// error in case the effective gasTipCap is negative
+func (tx *Transaction) EffectiveGasTipValue(baseFee *big.Int) *big.Int {
+	effectiveTip, _ := tx.EffectiveGasTip(baseFee)
+	return effectiveTip
+}
+
+// EffectiveGasTipCmp compares the effective gasTipCap of two transactions assuming the given base fee.
+func (tx *Transaction) EffectiveGasTipCmp(other *Transaction, baseFee *big.Int) int {
+	if baseFee == nil {
+		return tx.GasTipCapCmp(other)
+	}
+	return tx.EffectiveGasTipValue(baseFee).Cmp(other.EffectiveGasTipValue(baseFee))
+}
+
+// EffectiveGasTipIntCmp compares the effective gasTipCap of a transaction to the given gasTipCap.
+func (tx *Transaction) EffectiveGasTipIntCmp(other *big.Int, baseFee *big.Int) int {
+	if baseFee == nil {
+		return tx.GasTipCapIntCmp(other)
+	}
+	return tx.EffectiveGasTipValue(baseFee).Cmp(other)
 }
 
 // return the true RLP encoded storage size of transaction, either by encoding and returning it, or returning a previously cached value.
