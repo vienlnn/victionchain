@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	tmath "github.com/tomochain/tomochain/common/math"
+
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/crypto"
 	"github.com/tomochain/tomochain/rlp"
@@ -370,10 +372,15 @@ func (tx *Transaction) decodeTyped(b []byte) (TxData, error) {
 	if len(b) <= 1 {
 		return nil, ErrShortTypedTx
 	}
+	var inner TxData
 	switch b[0] {
+	case DynamicFeeTxType:
+		inner = new(DynamicFeeTx)
 	default:
 		return nil, ErrTxTypeNotSupported
 	}
+	err := inner.decode(b[1:])
+	return inner, err
 }
 
 // Hash hashes the RLP encoding of tx.
@@ -397,11 +404,13 @@ func (tx *Transaction) CacheHash() {
 // AsMessage requires a signer to derive the sender.
 //
 // XXX Rename message to something less arbitrary?
-func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int, checkNonce bool) (Message, error) {
+func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int, checkNonce bool, baseFee *big.Int) (Message, error) {
 	msg := Message{
 		nonce:           tx.Nonce(),
 		gasLimit:        tx.Gas(),
 		gasPrice:        new(big.Int).Set(tx.GasPrice()),
+		gasFeeCap:       tx.GasFeeCap(),
+		gasTipCap:       tx.GasTipCap(),
 		to:              tx.To(),
 		amount:          tx.Value(),
 		data:            tx.Data(),
@@ -416,6 +425,8 @@ func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int,
 		} else {
 			msg.gasPrice = common.TRC21GasPriceBefore
 		}
+	} else if baseFee != nil {
+		msg.gasPrice = tmath.BigMin(msg.gasPrice.Add(msg.gasTipCap, baseFee), msg.gasFeeCap)
 	}
 	return msg, err
 }
@@ -808,48 +819,6 @@ func (t *TransactionsByPriceAndNonce) Shift() {
 func (t *TransactionsByPriceAndNonce) Pop() {
 	heap.Pop(&t.heads)
 }
-
-// Message is a fully derived transaction and implements core.Message
-//
-// NOTE: In a future PR this will be removed.
-type Message struct {
-	to              *common.Address
-	from            common.Address
-	nonce           uint64
-	amount          *big.Int
-	gasLimit        uint64
-	gasPrice        *big.Int
-	data            []byte
-	checkNonce      bool
-	balanceTokenFee *big.Int
-}
-
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte, checkNonce bool, balanceTokenFee *big.Int) Message {
-	if balanceTokenFee != nil {
-		gasPrice = common.TRC21GasPrice
-	}
-	return Message{
-		from:            from,
-		to:              to,
-		nonce:           nonce,
-		amount:          amount,
-		gasLimit:        gasLimit,
-		gasPrice:        gasPrice,
-		data:            data,
-		checkNonce:      checkNonce,
-		balanceTokenFee: balanceTokenFee,
-	}
-}
-
-func (m Message) From() common.Address      { return m.from }
-func (m Message) BalanceTokenFee() *big.Int { return m.balanceTokenFee }
-func (m Message) To() *common.Address       { return m.to }
-func (m Message) GasPrice() *big.Int        { return m.gasPrice }
-func (m Message) Value() *big.Int           { return m.amount }
-func (m Message) Gas() uint64               { return m.gasLimit }
-func (m Message) Nonce() uint64             { return m.nonce }
-func (m Message) Data() []byte              { return m.data }
-func (m Message) CheckNonce() bool          { return m.checkNonce }
 
 // copyAddressPtr copies an address.
 func copyAddressPtr(a *common.Address) *common.Address {
