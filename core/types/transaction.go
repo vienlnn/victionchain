@@ -26,8 +26,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	tmath "github.com/tomochain/tomochain/common/math"
-
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/crypto"
 	"github.com/tomochain/tomochain/rlp"
@@ -404,7 +402,7 @@ func (tx *Transaction) CacheHash() {
 // AsMessage requires a signer to derive the sender.
 //
 // XXX Rename message to something less arbitrary?
-func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int, checkNonce bool, baseFee *big.Int) (Message, error) {
+func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int, checkNonce bool) (Message, error) { //baseFee *big.Int ignore
 	msg := Message{
 		nonce:           tx.Nonce(),
 		gasLimit:        tx.Gas(),
@@ -425,9 +423,10 @@ func (tx *Transaction) AsMessage(s Signer, balanceFee *big.Int, number *big.Int,
 		} else {
 			msg.gasPrice = common.TRC21GasPriceBefore
 		}
-	} else if baseFee != nil {
-		msg.gasPrice = tmath.BigMin(msg.gasPrice.Add(msg.gasTipCap, baseFee), msg.gasFeeCap)
 	}
+	// else if baseFee != nil {
+	// 	msg.gasPrice = tmath.BigMin(msg.gasPrice.Add(msg.gasTipCap, baseFee), msg.gasFeeCap)
+	// }
 	return msg, err
 }
 

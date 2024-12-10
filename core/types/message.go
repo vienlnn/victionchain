@@ -4,7 +4,6 @@ import (
 	"math/big"
 
 	"github.com/tomochain/tomochain/common"
-	"github.com/tomochain/tomochain/common/math"
 )
 
 // Message is a fully derived transaction and implements core.Message
@@ -24,28 +23,21 @@ type Message struct {
 	gasTipCap       *big.Int
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice *big.Int, gasFeeCap *big.Int, gasTipCap *big.Int, data []byte, checkNonce bool, balanceTokenFee *big.Int, baseFee *big.Int) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte, checkNonce bool, balanceTokenFee *big.Int) Message {
 	if balanceTokenFee != nil {
 		gasPrice = common.TRC21GasPrice
 	}
-	msg := Message{
+	return Message{
 		from:            from,
 		to:              to,
 		nonce:           nonce,
 		amount:          amount,
 		gasLimit:        gasLimit,
-		gasFeeCap:       gasFeeCap,
-		gasTipCap:       gasTipCap,
 		gasPrice:        gasPrice,
 		data:            data,
 		checkNonce:      checkNonce,
 		balanceTokenFee: balanceTokenFee,
 	}
-	if baseFee != nil {
-		// If baseFee provided, set gasPrice to effectiveGasPrice.
-		msg.gasPrice = math.BigMin(msg.gasPrice.Add(msg.gasTipCap, baseFee), msg.gasFeeCap)
-	}
-	return msg
 }
 
 func (m Message) From() common.Address      { return m.from }
