@@ -42,6 +42,8 @@ type sigCache struct {
 func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 	var signer Signer
 	switch {
+	case config.IsEIP1559(blockNumber):
+		signer = NewEIP1559Signer(config.ChainId)
 	case config.IsEIP155(blockNumber):
 		signer = NewEIP155Signer(config.ChainId)
 	case config.IsHomestead(blockNumber):
@@ -295,4 +297,80 @@ func CacheSigner(signer Signer, tx *Transaction) {
 		return
 	}
 	tx.from.Store(sigCache{signer: signer, from: addr})
+}
+
+type EIP1559Signer struct{ EIP155Signer }
+
+func NewEIP1559Signer(chainId *big.Int) Signer {
+	return EIP1559Signer{NewEIP155Signer(chainId)}
+}
+
+func (s EIP1559Signer) ChainID() *big.Int {
+	return s.chainId
+}
+
+func (s EIP1559Signer) Equal(s2 Signer) bool {
+	x, ok := s2.(EIP1559Signer)
+	return ok && x.chainId.Cmp(s.chainId) == 0
+}
+
+func (s EIP1559Signer) Sender(tx *Transaction) (common.Address, error) {
+	if tx.Type() == DynamicFeeTxType {
+		return s.EIP155Signer.Sender(tx)
+	}
+	V, R, S := tx.RawSignatureValues()
+	// DynamicFee txs are defined to use 0 and 1 as their recovery
+	// id, add 27 to become equivalent to unprotected Homestead signatures.
+	V = new(big.Int).Add(V, big.NewInt(27))
+	if tx.ChainId().Cmp(s.chainId) != 0 {
+		return common.Address{}, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, tx.ChainId(), s.chainId)
+	}
+	return recoverPlain(s.Hash(tx), R, S, V, true)
+}
+
+func (s EIP1559Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
+	txData, ok := tx.inner.(*DynamicFeeTx)
+	if !ok {
+		return s.EIP155Signer.SignatureValues(tx, sig)
+	}
+	// Check that chain ID of tx matches the signer. We also accept ID zero here,
+	// because it indicates that the chain ID was not specified in the tx.
+	if tx.ChainId().Sign() != 0 && txData.ChainID.Cmp(s.chainId) != 0 {
+		return nil, nil, nil, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, txData.ChainID, s.chainId)
+	}
+	R, S, _ = decodeSignature(sig)
+	V = big.NewInt(int64(sig[64]))
+	return R, S, V, nil
+}
+
+// Hash returns the hash to be signed by the sender.
+// It does not uniquely identify the transaction.
+func (s EIP1559Signer) Hash(tx *Transaction) common.Hash {
+	if tx.Type() != DynamicFeeTxType {
+		return s.EIP155Signer.Hash(tx)
+	}
+	return prefixedRlpHash(
+		tx.Type(),
+		[]interface{}{
+			s.chainId,
+			tx.Nonce(),
+			tx.GasTipCap(),
+			tx.GasFeeCap(),
+			tx.Gas(),
+			tx.To(),
+			tx.Value(),
+			tx.Data(),
+		})
+}
+
+var SignatureLength = 64 + 1
+
+func decodeSignature(sig []byte) (r, s, v *big.Int) {
+	if len(sig) != SignatureLength {
+		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), SignatureLength))
+	}
+	r = new(big.Int).SetBytes(sig[:32])
+	s = new(big.Int).SetBytes(sig[32:64])
+	v = new(big.Int).SetBytes([]byte{sig[64] + 27})
+	return r, s, v
 }
