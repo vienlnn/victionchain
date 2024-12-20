@@ -41,6 +41,7 @@ var (
 		EIP158Block:    big.NewInt(3),
 		ByzantiumBlock: big.NewInt(4),
 		SaigonBlock:    big.NewInt(86158494),
+		EIP1559Block:   big.NewInt(0),
 		Posv: &PosvConfig{
 			Period:              2,
 			Epoch:               900,
@@ -69,6 +70,7 @@ var (
 		TIPTomoXLendingBlock:         big.NewInt(0),
 		TIPTomoXCancellationFeeBlock: big.NewInt(0),
 		SaigonBlock:                  big.NewInt(10004200),
+		EIP1559Block:                 big.NewInt(0),
 		Posv: &PosvConfig{
 			Period:              2,
 			Epoch:               900,
@@ -216,7 +218,8 @@ type ChainConfig struct {
 	TIPTomoXLendingBlock         *big.Int `json:"tipTomoXLendingBlock,omitempty"`         // TIPTomoXLending switch block (nil = no fork, 0 = already activated)
 	TIPTomoXCancellationFeeBlock *big.Int `json:"tipTomoXCancellationFeeBlock,omitempty"` // TIPTomoXCancellationFee switch block (nil = no fork, 0 = already activated)
 
-	SaigonBlock *big.Int `json:"saigonBlock,omitempty"` // Saigon switch block (nil = no fork, 0 = already activated)
+	SaigonBlock  *big.Int `json:"saigonBlock,omitempty"`  // Saigon switch block (nil = no fork, 0 = already activated)
+	EIP1559Block *big.Int `json:"eip1559Block,omitempty"` // EIP-1559 switch block (nil = no fork, 0 = already activated)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -269,7 +272,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v TIP2019: %v TIPSigning: %v TIPRandomize: %v BlackListHF: %v TIPTRC21Fee: %v TIPTomoX: %v TIPTomoXLending: %v TIPTomoXCancellationFee: %v Saigon: %v Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v TIP2019: %v TIPSigning: %v TIPRandomize: %v BlackListHF: %v TIPTRC21Fee: %v TIPTomoX: %v TIPTomoXLending: %v TIPTomoXCancellationFee: %v Saigon: %v EIP1559: %v Engine: %v}",
 		c.ChainId,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -288,6 +291,7 @@ func (c *ChainConfig) String() string {
 		c.TIPTomoXLendingBlock,
 		c.TIPTomoXCancellationFeeBlock,
 		c.SaigonBlock,
+		c.EIP1559Block,
 		engine,
 	)
 }
@@ -329,11 +333,11 @@ func (c *ChainConfig) IsIstanbul(num *big.Int) bool {
 }
 
 func (c *ChainConfig) IsTIP2019(num *big.Int) bool {
-	return isForked(common.TIP2019Block, num)
+	return isForked(big.NewInt(0), num)
 }
 
 func (c *ChainConfig) IsTIPSigning(num *big.Int) bool {
-	return isForked(common.TIPSigningBlock, num)
+	return isForked(big.NewInt(0), num)
 }
 
 func (c *ChainConfig) IsTIPRandomize(num *big.Int) bool {
@@ -362,6 +366,10 @@ func (c *ChainConfig) IsTIPTomoXCancellationFee(num *big.Int) bool {
 
 func (c *ChainConfig) IsSaigon(num *big.Int) bool {
 	return isForked(c.SaigonBlock, num)
+}
+
+func (c *ChainConfig) IsEIP1559(num *big.Int) bool {
+	return isForked(c.EIP1559Block, num)
 }
 
 // GasTable returns the gas table corresponding to the current phase (homestead or homestead reprice).
@@ -454,6 +462,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head *big.Int) *Confi
 	if isForkIncompatible(c.SaigonBlock, newcfg.SaigonBlock, head) {
 		return newCompatError("Saigon fork block", c.SaigonBlock, newcfg.SaigonBlock)
 	}
+	if isForkIncompatible(c.EIP1559Block, newcfg.EIP1559Block, head) {
+		return newCompatError("Saigon fork block", c.EIP1559Block, newcfg.EIP1559Block)
+	}
 	return nil
 }
 
@@ -525,6 +536,7 @@ type Rules struct {
 	IsBlackListHF, IsTIPTRC21Fee                             bool
 	IsTIPTomoX, IsTIPTomoXLending, IsTIPTomoXCancellationFee bool
 	IsSaigon                                                 bool
+	IsEIP1559                                                bool
 }
 
 func (c *ChainConfig) Rules(num *big.Int) Rules {
@@ -552,5 +564,6 @@ func (c *ChainConfig) Rules(num *big.Int) Rules {
 		IsTIPTomoXLending:         c.IsTIPTomoXLending(num),
 		IsTIPTomoXCancellationFee: c.IsTIPTomoXCancellationFee(num),
 		IsSaigon:                  c.IsSaigon(num),
+		IsEIP1559:                 c.IsEIP1559(num),
 	}
 }

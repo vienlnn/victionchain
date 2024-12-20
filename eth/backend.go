@@ -134,6 +134,9 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 		return nil, genesisErr
 	}
 
+	// hardcode for test
+	chainConfig.EIP1559Block = big.NewInt(0)
+	chainConfig.SaigonBlock = big.NewInt(0)
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	eth := &Ethereum{
@@ -796,6 +799,11 @@ func (s *Ethereum) StartStaking(local bool) error {
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 	}
 	go s.miner.Start(eb)
+	// new: can=1
+	// start: mining=1, should=1
+	// end: mining=0, should=0
+	// done/fail: should=0 can=1
+	// startev:
 	return nil
 }
 
