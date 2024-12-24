@@ -315,7 +315,7 @@ func (s EIP1559Signer) Equal(s2 Signer) bool {
 }
 
 func (s EIP1559Signer) Sender(tx *Transaction) (common.Address, error) {
-	if tx.Type() == DynamicFeeTxType {
+	if tx.Type() != DynamicFeeTxType {
 		return s.EIP155Signer.Sender(tx)
 	}
 	V, R, S := tx.RawSignatureValues()

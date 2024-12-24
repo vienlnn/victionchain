@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/tomochain/tomochain/accounts"
+	"github.com/tomochain/tomochain/consensus/misc/eip1559"
 	"github.com/tomochain/tomochain/tomoxlending/lendingstate"
 
 	"math/big"
@@ -528,9 +529,9 @@ func (self *worker) commitNewWork() {
 	tstart := time.Now()
 	parent := self.chain.CurrentBlock()
 	var signers map[common.Address]struct{}
-	if parent.Hash().Hex() == self.lastParentBlockCommit {
-		return
-	}
+	// if parent.Hash().Hex() == self.lastParentBlockCommit {
+	// 	return
+	// }
 	if !self.announceTxs && atomic.LoadInt32(&self.mining) == 0 {
 		return
 	}
@@ -593,6 +594,22 @@ func (self *worker) commitNewWork() {
 		Extra:      self.extra,
 		Time:       big.NewInt(tstamp),
 	}
+
+	// eip-1559
+	if self.config.IsEIP1559(header.Number) {
+		baseFee := eip1559.CalcBaseFee(self.config, parent.Header())
+		header.BaseFee = baseFee
+
+		gasLimit := core.CalcGasLimitEIP1559(parent.GasLimit(), params.TargetGasLimit)
+		header.GasLimit = gasLimit
+
+		// gasLimit for eip-1559 checkpoint
+		if !self.config.IsEIP1559(parent.Number()) {
+			parentGasLimit := parent.GasLimit() * self.config.ElasticityMultiplier()
+			header.GasLimit = core.CalcGasLimitEIP1559(parentGasLimit, params.TargetGasLimit)
+		}
+	}
+	fmt.Println("Block", "number", header.Number, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	// Only set the coinbase if we are mining (avoid spurious block rewards)
 	if atomic.LoadInt32(&self.mining) == 1 {
 		header.Coinbase = self.coinbase
