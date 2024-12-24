@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/consensus"
 	"github.com/tomochain/tomochain/consensus/posv"
@@ -202,6 +203,33 @@ func CalcGasLimit(parent *types.Block) uint64 {
 		limit = parent.GasLimit() + decay
 		if limit > params.TargetGasLimit {
 			limit = params.TargetGasLimit
+		}
+	}
+	return limit
+}
+
+// CalcGasLimit1559 computes the gas limit of the next block after parent after EIP-1559
+func CalcGasLimitEIP1559(parentGasLimit, desiredLimit uint64) uint64 {
+	delta := parentGasLimit/params.GasLimitBoundDivisor - 1
+	limit := parentGasLimit
+	if desiredLimit < params.MinGasLimit {
+		desiredLimit = params.MinGasLimit
+	}
+
+	// increase
+	if limit < desiredLimit {
+		limit = parentGasLimit + delta
+		if limit > desiredLimit {
+			limit = desiredLimit
+		}
+		return limit
+	}
+
+	// decrease
+	if limit > desiredLimit {
+		limit = parentGasLimit - delta
+		if limit < desiredLimit {
+			limit = desiredLimit
 		}
 	}
 	return limit

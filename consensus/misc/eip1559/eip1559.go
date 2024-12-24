@@ -1,20 +1,24 @@
 package eip1559
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/tomochain/tomochain/common"
+	"github.com/tomochain/tomochain/consensus/misc"
 	"github.com/tomochain/tomochain/core/types"
 	"github.com/tomochain/tomochain/params"
 )
 
 // CalcBaseFee calculate base fee of block header
 func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
+	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsEIP1559(parent.Number) {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
 	}
-
 	parentGasTarget := parent.GasLimit / config.ElasticityMultiplier()
+	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
 		return new(big.Int).Set(parent.BaseFee)
 	}
@@ -37,10 +41,33 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 		num.Mul(num, parent.BaseFee)
 		num.Div(num, denom.SetUint64(parentGasTarget))
 		num.Div(num, denom.SetUint64(config.BaseFeeChangeDenominator()))
+
 		baseFee := num.Sub(parent.BaseFee, num)
 		if baseFee.Cmp(common.Big0) < 0 {
 			baseFee = common.Big0
 		}
 		return baseFee
 	}
+}
+
+// VerifyEIP1559Header verifies some header attributes which were changed in EIP-1559,
+// - gas limit check
+// - basefee check
+func VerifyEIP1559Header(config *params.ChainConfig, parent, header *types.Header) error {
+	parentGasLimit := parent.GasLimit
+	if !config.IsEIP1559(parent.Number) {
+		parentGasLimit = parentGasLimit * config.ElasticityMultiplier()
+	}
+	if err := misc.VerifyGasLimit(parentGasLimit, header.GasLimit); err != nil {
+		return err
+	}
+	if header.BaseFee == nil {
+		return errors.New("header is missing baseFee")
+	}
+	expectedBaseFee := CalcBaseFee(config, parent)
+	if header.BaseFee.Cmp(expectedBaseFee) != 0 {
+		return fmt.Errorf("invalid baseFee: have %s, want %s, parentBaseFee %s, parentGasUsed %d",
+			header.BaseFee, expectedBaseFee, parent.BaseFee, parent.GasUsed)
+	}
+	return nil
 }
