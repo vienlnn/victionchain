@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tomochain/tomochain/consensus/misc/eip1559"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -382,6 +383,23 @@ func (c *Posv) verifyHeader(chain consensus.ChainReader, header *types.Header, p
 	}
 	if len(header.Extra) < extraVanity+extraSeal {
 		return errMissingSignature
+	}
+
+	// Verify block gasLimit, baseFee after eip-1559
+	parent := chain.GetHeader(header.ParentHash, number-1)
+	if number > 0 && parent == nil {
+		return consensus.ErrUnknownAncestor
+	}
+	if !chain.Config().IsEIP1559(header.Number) {
+		// check available baseFee field
+		if header.BaseFee != nil {
+			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
+		}
+	} else {
+		if err := eip1559.VerifyEIP1559Header(chain.Config(), parent, header); err != nil {
+			fmt.Println("err verifying header:", err)
+			return err
+		}
 	}
 	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
 	signersBytes := len(header.Extra) - extraVanity - extraSeal

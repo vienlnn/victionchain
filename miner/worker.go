@@ -590,7 +590,7 @@ func (self *worker) commitNewWork() {
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   params.TargetGasLimit,
+		GasLimit:   core.CalcGasLimitEIP1559(parent.GasLimit(), params.TargetGasLimit),
 		Extra:      self.extra,
 		Time:       big.NewInt(tstamp),
 	}
@@ -599,14 +599,9 @@ func (self *worker) commitNewWork() {
 	if self.config.IsEIP1559(header.Number) {
 		baseFee := eip1559.CalcBaseFee(self.config, parent.Header())
 		header.BaseFee = baseFee
-
-		gasLimit := core.CalcGasLimitEIP1559(parent.GasLimit(), params.TargetGasLimit)
-		header.GasLimit = gasLimit
-
-		// gasLimit for eip-1559 checkpoint
+		//gasLimit for eip-1559 checkpoint
 		if !self.config.IsEIP1559(parent.Number()) {
-			parentGasLimit := parent.GasLimit() * self.config.ElasticityMultiplier()
-			header.GasLimit = core.CalcGasLimitEIP1559(parentGasLimit, params.TargetGasLimit)
+			header.GasLimit = core.CalcGasLimitEIP1559(parent.GasLimit()*self.config.ElasticityMultiplier(), params.TargetGasLimit)
 		}
 	}
 	fmt.Println("Block", "number", header.Number, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)

@@ -135,7 +135,7 @@ func New(ctx *node.ServiceContext, config *Config, tomoXServ *tomox.TomoX, lendi
 	}
 
 	// hardcode for test
-	chainConfig.EIP1559Block = big.NewInt(0)
+	chainConfig.EIP1559Block = big.NewInt(10)
 	chainConfig.SaigonBlock = big.NewInt(0)
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
