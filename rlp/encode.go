@@ -23,8 +23,9 @@ import (
 	"math/big"
 	"reflect"
 
-	"github.com/holiman/uint256"
 	rlpstruct "github.com/tomochain/tomochain/rlp/internal"
+
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -145,10 +146,6 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		return writeBigIntPtr, nil
 	case typ.AssignableTo(bigInt):
 		return writeBigIntNoPtr, nil
-	case typ == reflect.PtrTo(u256Int):
-		return writeU256IntPtr, nil
-	case typ == u256Int:
-		return writeU256IntNoPtr, nil
 	case kind == reflect.Ptr:
 		return makePtrWriter(typ, ts)
 	case reflect.PtrTo(typ).Implements(encoderInterface):

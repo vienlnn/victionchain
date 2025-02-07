@@ -28,9 +28,8 @@ import (
 	"strings"
 	"sync"
 
-	rlpstruct "github.com/tomochain/tomochain/rlp/internal"
-
 	"github.com/holiman/uint256"
+	rlpstruct "github.com/tomochain/tomochain/rlp/internal"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -163,10 +162,6 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 		return decodeBigInt, nil
 	case typ.AssignableTo(bigInt):
 		return decodeBigIntNoPtr, nil
-	case typ == reflect.PtrTo(u256Int):
-		return decodeU256, nil
-	case typ == u256Int:
-		return decodeU256NoPtr, nil
 	case kind == reflect.Ptr:
 		return makePtrDecoder(typ, tags)
 	case reflect.PtrTo(typ).Implements(decoderInterface):
