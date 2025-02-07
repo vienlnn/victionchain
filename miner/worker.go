@@ -321,7 +321,7 @@ func (self *worker) update() {
 				acc, _ := types.Sender(self.current.signer, ev.Tx)
 				txs := map[common.Address]types.Transactions{acc: {ev.Tx}}
 				feeCapacity := state.GetTRC21FeeCapacityFromState(self.current.state)
-				txset, specialTxs := types.NewTransactionsByPriceAndNonce(self.current.signer, txs, nil, feeCapacity)
+				txset, specialTxs := types.NewTransactionsByPriceAndNonce(self.current.signer, txs, nil, feeCapacity, self.current.header.BaseFee)
 				self.current.commitTransactions(self.mux, feeCapacity, txset, specialTxs, self.chain, self.coinbase)
 				self.updateSnapshot()
 				self.currentMu.Unlock()
@@ -529,9 +529,9 @@ func (self *worker) commitNewWork() {
 	tstart := time.Now()
 	parent := self.chain.CurrentBlock()
 	var signers map[common.Address]struct{}
-	// if parent.Hash().Hex() == self.lastParentBlockCommit {
-	// 	return
-	// }
+	//if parent.Hash().Hex() == self.lastParentBlockCommit {
+	//	return
+	//}
 	if !self.announceTxs && atomic.LoadInt32(&self.mining) == 0 {
 		return
 	}
@@ -665,7 +665,7 @@ func (self *worker) commitNewWork() {
 			log.Error("Failed to fetch pending transactions", "err", err)
 			return
 		}
-		txs, specialTxs = types.NewTransactionsByPriceAndNonce(self.current.signer, pending, signers, feeCapacity)
+		txs, specialTxs = types.NewTransactionsByPriceAndNonce(self.current.signer, pending, signers, feeCapacity, self.current.header.BaseFee)
 	}
 	if atomic.LoadInt32(&self.mining) == 1 {
 		wallet, err := self.eth.AccountManager().Find(accounts.Account{Address: self.coinbase})
