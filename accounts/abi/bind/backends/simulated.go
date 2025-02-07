@@ -198,8 +198,8 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call tomochain.Call
 	if err != nil {
 		return nil, err
 	}
-	rval, _, _, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), state)
-	return rval, err
+	result, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), state)
+	return result.ReturnData, err
 }
 
 // FIXME: please use copyState for this function
@@ -228,11 +228,11 @@ func (b *SimulatedBackend) CallContractWithState(call tomochain.CallMsg, chain c
 	vmenv := vm.NewEVM(evmContext, statedb, nil, chain.Config(), vm.Config{})
 	gaspool := new(core.GasPool).AddGas(1000000)
 	owner := common.Address{}
-	rval, _, _, err := core.NewStateTransition(vmenv, msg, gaspool).TransitionDb(owner)
+	result, err := core.NewStateTransition(vmenv, msg, gaspool).TransitionDb(owner)
 	if err != nil {
 		return nil, err
 	}
-	return rval, err
+	return result.ReturnData, err
 }
 
 // PendingCallContract executes a contract call on the pending state.
@@ -241,8 +241,8 @@ func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call tomocha
 	defer b.mu.Unlock()
 	defer b.pendingState.RevertToSnapshot(b.pendingState.Snapshot())
 
-	rval, _, _, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
-	return rval, err
+	result, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
+	return result.ReturnData, err
 }
 
 // PendingNonceAt implements PendingStateReader.PendingNonceAt, retrieving
@@ -284,10 +284,10 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call tomochain.CallM
 		call.Gas = gas
 
 		snapshot := b.pendingState.Snapshot()
-		_, _, failed, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
+		result, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
 		b.pendingState.RevertToSnapshot(snapshot)
 
-		if err != nil || failed {
+		if err != nil || result.Failed() {
 			return false
 		}
 		return true
@@ -312,7 +312,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call tomochain.CallM
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(ctx context.Context, call tomochain.CallMsg, block *types.Block, statedb *state.StateDB) ([]byte, uint64, bool, error) {
+func (b *SimulatedBackend) callContract(ctx context.Context, call tomochain.CallMsg, block *types.Block, statedb *state.StateDB) (*core.ExecutionResult, error) {
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = big.NewInt(1)
@@ -337,7 +337,7 @@ func (b *SimulatedBackend) callContract(ctx context.Context, call tomochain.Call
 	evmContext := core.NewEVMContext(msg, block.Header(), b.blockchain, nil)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(evmContext, statedb, nil, b.config, vm.Config{})
+	vmenv := vm.NewEVM(evmContext, statedb, nil, b.config, vm.Config{NoBaseFee: true})
 	gaspool := new(core.GasPool).AddGas(math.MaxUint64)
 	owner := common.Address{}
 	return core.NewStateTransition(vmenv, msg, gaspool).TransitionDb(owner)
@@ -468,6 +468,8 @@ func (m callmsg) Nonce() uint64             { return 0 }
 func (m callmsg) CheckNonce() bool          { return false }
 func (m callmsg) To() *common.Address       { return m.CallMsg.To }
 func (m callmsg) GasPrice() *big.Int        { return m.CallMsg.GasPrice }
+func (m callmsg) GasFeeCap() *big.Int       { return m.CallMsg.GasFeeCap }
+func (m callmsg) GasTipCap() *big.Int       { return m.CallMsg.GasTipCap }
 func (m callmsg) Gas() uint64               { return m.CallMsg.Gas }
 func (m callmsg) Value() *big.Int           { return m.CallMsg.Value }
 func (m callmsg) Data() []byte              { return m.CallMsg.Data }

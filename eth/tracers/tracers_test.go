@@ -154,6 +154,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Difficulty:  big.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 		GasPrice:    big.NewInt(1),
+		BaseFee:     big.NewInt(1),
 	}
 	alloc := core.GenesisAlloc{}
 
@@ -179,12 +180,12 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	evm := vm.NewEVM(context, statedb, nil, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
 
-	msg, err := tx.AsMessage(signer, nil, nil, false)
+	msg, err := tx.AsMessage(signer, nil, nil, context.BaseFee)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.Gas()))
-	if _, _, _, err = st.TransitionDb(common.Address{}); err != nil {
+	if _, err = st.TransitionDb(common.Address{}); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
 	// Retrieve the trace result and compare against the etalon
@@ -243,6 +244,7 @@ func TestCallTracer(t *testing.T) {
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 				GasPrice:    tx.GasPrice(),
+				BaseFee:     big.NewInt(1),
 			}
 			db := rawdb.NewMemoryDatabase()
 			statedb := tests.MakePreState(db, test.Genesis.Alloc)
@@ -254,12 +256,12 @@ func TestCallTracer(t *testing.T) {
 			}
 			evm := vm.NewEVM(context, statedb, nil, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 
-			msg, err := tx.AsMessage(signer, nil, common.Big0, false)
+			msg, err := tx.AsMessage(signer, nil, common.Big0, context.BaseFee)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.Gas()))
-			if _, _, _, err = st.TransitionDb(common.Address{}); err != nil {
+			if _, err = st.TransitionDb(common.Address{}); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
 			// Retrieve the trace result and compare against the etalon

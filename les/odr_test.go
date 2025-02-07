@@ -19,10 +19,11 @@ package les
 import (
 	"bytes"
 	"context"
-	"github.com/tomochain/tomochain/core/rawdb"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/tomochain/tomochain/core/rawdb"
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/common/math"
@@ -133,16 +134,16 @@ func odrContractCall(ctx context.Context, db ethdb.Database, config *params.Chai
 				if value, ok := feeCapacity[testContractAddr]; ok {
 					balanceTokenFee = value
 				}
-				msg := callmsg{types.NewMessage(from.Address(), &testContractAddr, 0, new(big.Int), 100000, new(big.Int), data, false, balanceTokenFee)}
+				msg := callmsg{types.NewMessage(from.Address(), &testContractAddr, 0, new(big.Int), 100000, new(big.Int), new(big.Int), new(big.Int), data, false, balanceTokenFee, header.BaseFee)}
 
 				context := core.NewEVMContext(msg, header, bc, nil)
-				vmenv := vm.NewEVM(context, statedb, nil, config, vm.Config{})
+				vmenv := vm.NewEVM(context, statedb, nil, config, vm.Config{NoBaseFee: true})
 
 				//vmenv := core.NewEnv(statedb, config, bc, msg, header, vm.Config{})
 				gp := new(core.GasPool).AddGas(math.MaxUint64)
 				owner := common.Address{}
-				ret, _, _, _ := core.ApplyMessage(vmenv, msg, gp, owner)
-				res = append(res, ret...)
+				result, _ := core.ApplyMessage(vmenv, msg, gp, owner)
+				res = append(res, result.ReturnData...)
 			}
 		} else {
 			header := lc.GetHeaderByHash(bhash)
@@ -153,14 +154,14 @@ func odrContractCall(ctx context.Context, db ethdb.Database, config *params.Chai
 			if value, ok := feeCapacity[testContractAddr]; ok {
 				balanceTokenFee = value
 			}
-			msg := callmsg{types.NewMessage(testBankAddress, &testContractAddr, 0, new(big.Int), 100000, new(big.Int), data, false, balanceTokenFee)}
+			msg := callmsg{types.NewMessage(testBankAddress, &testContractAddr, 0, new(big.Int), 100000, new(big.Int), new(big.Int), new(big.Int), data, false, balanceTokenFee, header.BaseFee)}
 			context := core.NewEVMContext(msg, header, lc, nil)
-			vmenv := vm.NewEVM(context, statedb, nil, config, vm.Config{})
+			vmenv := vm.NewEVM(context, statedb, nil, config, vm.Config{NoBaseFee: true})
 			gp := new(core.GasPool).AddGas(math.MaxUint64)
 			owner := common.Address{}
-			ret, _, _, _ := core.ApplyMessage(vmenv, msg, gp, owner)
+			result, _ := core.ApplyMessage(vmenv, msg, gp, owner)
 			if statedb.Error() == nil {
-				res = append(res, ret...)
+				res = append(res, result.ReturnData...)
 			}
 		}
 	}

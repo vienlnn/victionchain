@@ -33,6 +33,10 @@ var (
 	// next one expected based on the local chain.
 	ErrNonceTooHigh = errors.New("nonce too high")
 
+	// ErrInsufficientFundsForTransfer is returned if the transaction sender doesn't
+	// have enough funds for transfer(topmost call only).
+	ErrInsufficientFundsForTransfer = errors.New("insufficient funds for transfer")
+
 	ErrNotPoSV = errors.New("Posv not found in config")
 
 	ErrNotFoundM1 = errors.New("list M1 not found ")

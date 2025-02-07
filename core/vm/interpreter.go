@@ -38,6 +38,7 @@ type Config struct {
 	EVMInterpreter   string // External EVM interpreter options
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+	NoBaseFee bool  // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the
