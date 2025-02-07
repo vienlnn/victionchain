@@ -19,12 +19,13 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/tomochain/tomochain/consensus"
 	"math"
 	"math/big"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/tomochain/tomochain/consensus"
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/core/state"
@@ -50,6 +51,10 @@ var (
 	// ErrNonceTooLow is returned if the nonce of a transaction is lower than the
 	// one present in the local chain.
 	ErrNonceTooLow = errors.New("nonce too low")
+
+	// ErrNonceMax is returned if the nonce of a transaction sender account has
+	// maximum allowed value and would become invalid if incremented.
+	ErrNonceMax = errors.New("nonce has max value")
 
 	// ErrUnderpriced is returned if a transaction's gas price is below the minimum
 	// configured for the transaction pool.
@@ -87,6 +92,25 @@ var (
 	ErrDuplicateSpecialTransaction = errors.New("duplicate a special transaction")
 
 	ErrMinDeploySMC = errors.New("smart contract creation cost is under allowance")
+
+	// ErrTipVeryHigh is a sanity error to avoid extremely big numbers specified
+	// in the tip field.
+	ErrTipVeryHigh = errors.New("max priority fee per gas higher than 2^256-1")
+
+	// ErrFeeCapVeryHigh is a sanity error to avoid extremely big numbers specified
+	// in the fee cap field.
+	ErrFeeCapVeryHigh = errors.New("max fee per gas higher than 2^256-1")
+
+	// ErrTipAboveFeeCap is a sanity error to ensure no one is able to specify a
+	// transaction with a tip higher than the total fee cap.
+	ErrTipAboveFeeCap = errors.New("max priority fee per gas higher than max fee per gas")
+
+	// ErrFeeCapTooLow is returned if the transaction fee cap is less than the
+	// the base fee of the block.
+	ErrFeeCapTooLow = errors.New("max fee per gas less than block base fee")
+
+	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
+	ErrSenderNoEOA = errors.New("sender not an eoa")
 )
 
 var (
@@ -235,6 +259,29 @@ type TxPool struct {
 	trc21FeeCapacity map[common.Address]*big.Int
 }
 
+const (
+	// txSlotSize is used to calculate how many data slots a single transaction
+	// takes up based on its size. The slots are used as DoS protection, ensuring
+	// that validating a new transaction remains a constant operation (in reality
+	// O(maxslots), where max slots are 4 currently).
+	txSlotSize = 32 * 1024
+
+	// txMaxSize is the maximum size a single transaction can have. This field has
+	// non-trivial consequences: larger transactions are significantly harder and
+	// more expensive to propagate; larger transactions also take more resources
+	// to validate whether they fit into the pool or not.
+	txMaxSize = 4 * txSlotSize // 128KB
+)
+
+// ValidationOptions define certain differences between transaction validation
+// across the different pools without having to duplicate those checks.
+type ValidationOptions struct {
+	Config *params.ChainConfig // Chain configuration to selectively validate based on current fork rules
+
+	Accept  uint8  // Bitmap of transaction types that should be accepted for the calling pool
+	MaxSize uint64 // Maximum size of a transaction that the caller can meaningfully handle
+}
+
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
 func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain) *TxPool {
@@ -246,7 +293,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		config:           config,
 		chainconfig:      chainconfig,
 		chain:            chain,
-		signer:           types.NewEIP155Signer(chainconfig.ChainId),
+		signer:           types.LatestSigner(chainconfig),
 		pending:          make(map[common.Address]*txList),
 		queue:            make(map[common.Address]*txList),
 		beats:            make(map[common.Address]time.Time),
@@ -578,6 +625,7 @@ func (pool *TxPool) local() map[common.Address]types.Transactions {
 func (pool *TxPool) GetSender(tx *types.Transaction) (common.Address, error) {
 	from, err := types.Sender(pool.signer, tx)
 	if err != nil {
+		fmt.Println("get_sender invalid sender")
 		return common.Address{}, ErrInvalidSender
 	}
 	return from, nil
@@ -585,7 +633,13 @@ func (pool *TxPool) GetSender(tx *types.Transaction) (common.Address, error) {
 
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
-func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
+func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, local bool, opts *ValidationOptions) error {
+	// fmt.Println("txHash:", tx.Hash().String(), "txTyped:", tx.Type())
+	// Ensure transactions not implemented by the calling pool are rejected
+	if opts.Accept&(1<<tx.Type()) == 0 {
+		return fmt.Errorf("%w: tx type %v not supported by this pool", types.ErrTxTypeNotSupported, tx.Type())
+	}
+
 	// check if sender is in black list
 	if tx.From() != nil && common.Blacklist[*tx.From()] {
 		return fmt.Errorf("Reject transaction with sender in black-list: %v", tx.From().Hex())
@@ -594,10 +648,12 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if tx.To() != nil && common.Blacklist[*tx.To()] {
 		return fmt.Errorf("Reject transaction with receiver in black-list: %v", tx.To().Hex())
 	}
-
 	// Heuristic limit, reject transactions over 32KB to prevent DOS attacks
-	if tx.Size() > 32*1024 {
+	if tx.Size() > common.StorageSize(opts.MaxSize) {
 		return ErrOversizedData
+	}
+	if !opts.Config.IsEIP1559(header.Number) && tx.Type() == types.DynamicFeeTxType {
+		return fmt.Errorf("%w: type %d rejected, pool not yet in EIP-1559 block", types.ErrTxTypeNotSupported, tx.Type())
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
 	// transactions but may occur if you create a transaction using the RPC.
@@ -605,11 +661,26 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas.
-	if pool.currentMaxGas < tx.Gas() {
+	if header.GasLimit < tx.Gas() {
 		return ErrGasLimit
 	}
+	// Sanity check for extremely large numbers (supported by RLP or RPC)
+	if tx.GasFeeCap().BitLen() > 256 {
+		return ErrFeeCapVeryHigh
+	}
+	if tx.GasTipCap().BitLen() > 256 {
+		return ErrTipVeryHigh
+	}
+	// Ensure gasFeeCap is greater than or equal to gasTipCap
+	if tx.GasFeeCapIntCmp(tx.GasTipCap()) < 0 {
+		return ErrTipAboveFeeCap
+	}
+
 	// Make sure the transaction is signed properly
+	fmt.Println("tx", tx)
 	from, err := types.Sender(pool.signer, tx)
+	fmt.Println("from", from.String(), tx)
+
 	if err != nil {
 		return ErrInvalidSender
 	}
@@ -620,6 +691,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			return ErrUnderpriced
 		}
 	}
+
 	// Ensure the transaction adheres to nonce ordering
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
 		return ErrNonceTooLow
@@ -644,6 +716,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 			minGasPrice = common.TRC21GasPrice
 		}
 	}
+	fmt.Println("tx_pool:", "balance", balance, "feeCapacity", feeCapacity, "cost", cost)
 	if new(big.Int).Add(balance, feeCapacity).Cmp(cost) < 0 {
 		return ErrInsufficientFunds
 	}
@@ -707,11 +780,19 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (bool, error) {
 	}
 
 	// If the transaction fails basic validation, discard it
-	if err := pool.validateTx(tx, local); err != nil {
+	// if err := pool.validateTx(tx, local); err != nil {
+	// 	log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
+	// 	invalidTxCounter.Inc(1)
+	// 	return false, err
+	// }
+	//fmt.Println("-> add:", tx.Type())
+
+	if err := pool.validateTxBasics(tx, local); err != nil {
 		log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
 		invalidTxCounter.Inc(1)
 		return false, err
 	}
+
 	from, _ := types.Sender(pool.signer, tx) // already validated
 	if tx.IsSpecialTransaction() && pool.IsSigner != nil && pool.IsSigner(from) && pool.pendingState.GetNonce(from) == tx.Nonce() {
 		return pool.promoteSpecialTx(from, tx)
@@ -917,7 +998,13 @@ func (pool *TxPool) addTx(tx *types.Transaction, local bool) error {
 	types.CacheSigner(pool.signer, tx)
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
+	// fmt.Println("-> addTx:", tx.Type())
 
+	// validate transaction
+	err := pool.validateTxBasics(tx, local)
+	if err != nil {
+		return err
+	}
 	// Try to inject the transaction and update any state
 	replace, err := pool.add(tx, local)
 	if err != nil {
@@ -1250,6 +1337,20 @@ func (pool *TxPool) demoteUnexecutables() {
 			delete(pool.beats, addr)
 		}
 	}
+}
+
+func (pool *TxPool) validateTxBasics(tx *types.Transaction, local bool) error {
+	opts := &ValidationOptions{
+		Config: pool.chainconfig,
+		Accept: 0 |
+			1<<types.LegacyTxType |
+			1<<types.DynamicFeeTxType,
+		MaxSize: txMaxSize,
+	}
+	if err := pool.validateTx(tx, pool.chain.CurrentBlock().Header(), local, opts); err != nil {
+		return err
+	}
+	return nil
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.
