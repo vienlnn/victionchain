@@ -20,9 +20,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/tomochain/tomochain/core/rawdb"
 	"math/big"
 	"strings"
+
+	"github.com/tomochain/tomochain/core/rawdb"
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/common/hexutil"
@@ -144,7 +145,7 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 	snapshot := statedb.Snapshot()
 
 	coinbase := &t.json.Env.Coinbase
-	if _, _, _, err := core.ApplyMessage(evm, msg, gaspool, *coinbase); err != nil {
+	if _, err := core.ApplyMessage(evm, msg, gaspool, *coinbase); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
 	if logs := rlpHash(statedb.Logs()); logs != common.Hash(post.Logs) {
@@ -235,7 +236,7 @@ func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid tx data %q", dataHex)
 	}
-	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, data, true, nil)
+	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, big.NewInt(1), big.NewInt(1), data, true, nil, big.NewInt(1))
 	return msg, nil
 }
 
