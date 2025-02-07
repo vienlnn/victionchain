@@ -1,19 +1,3 @@
-// Copyright 2016 The go-ethereum Authors
-// This file is part of the go-ethereum library.
-//
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
 package types
 
 import (
@@ -52,6 +36,39 @@ func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 		signer = FrontierSigner{}
 	}
 	return signer
+}
+
+// LatestSigner returns the 'most permissive' Signer available for the given chain
+// configuration. Specifically, this enables support of all types of transactions
+// when their respective forks are scheduled to occur at any block number (or time)
+// in the chain config.
+//
+// Use this in transaction-handling code where the current block number is unknown. If you
+// have the current block number available, use MakeSigner instead.
+func LatestSigner(config *params.ChainConfig) Signer {
+	if config.ChainId != nil {
+		if config.EIP1559Block != nil {
+			return NewEIP1559Signer(config.ChainId)
+		}
+		if config.EIP155Block != nil {
+			return NewEIP155Signer(config.ChainId)
+		}
+	}
+	return HomesteadSigner{}
+}
+
+// LatestSignerForChainID returns the 'most permissive' Signer available. Specifically,
+// this enables support for EIP-155 replay protection and all implemented EIP-2718
+// transaction types if chainID is non-nil.
+//
+// Use this in transaction-handling code where the current block number and fork
+// configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
+// If you have a ChainConfig and know the current block number, use MakeSigner instead.
+func LatestSignerForChainID(chainID *big.Int) Signer {
+	if chainID == nil {
+		return HomesteadSigner{}
+	}
+	return NewEIP1559Signer(chainID)
 }
 
 // SignTx signs the transaction using the given signer and private key
@@ -98,21 +115,86 @@ type Signer interface {
 	// SignatureValues returns the raw R, S, V values corresponding to the
 	// given signature.
 	SignatureValues(tx *Transaction, sig []byte) (r, s, v *big.Int, err error)
+	ChainID() *big.Int
 	// Hash returns the hash to be signed.
 	Hash(tx *Transaction) common.Hash
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(Signer) bool
-	// ChainID
-	ChainID() *big.Int
+}
+
+type EIP1559Signer struct{ EIP155Signer }
+
+// NewEIP1559Signer returns a signer that accepts
+// - EIP-1559 dynamic fee transactions
+// - EIP-155 replay protected transactions, and
+// - legacy Homestead transactions.
+func NewEIP1559Signer(chainId *big.Int) Signer {
+	return EIP1559Signer{NewEIP155Signer(chainId)}
+}
+
+func (s EIP1559Signer) ChainID() *big.Int {
+	return s.chainId
+}
+
+func (s EIP1559Signer) Sender(tx *Transaction) (common.Address, error) {
+	if tx.Type() != DynamicFeeTxType {
+		return s.EIP155Signer.Sender(tx)
+	}
+	V, R, S := tx.RawSignatureValues()
+	// DynamicFee txs are defined to use 0 and 1 as their recovery
+	// id, add 27 to become equivalent to unprotected Homestead signatures.
+	V = new(big.Int).Add(V, big.NewInt(27))
+
+	if tx.ChainId().Cmp(s.chainId) != 0 {
+		return common.Address{}, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, tx.ChainId(), s.chainId)
+	}
+	return recoverPlain(s.Hash(tx), R, S, V, true)
+}
+
+func (s EIP1559Signer) Equal(s2 Signer) bool {
+	x, ok := s2.(EIP1559Signer)
+	return ok && x.chainId.Cmp(s.chainId) == 0
+}
+
+func (s EIP1559Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
+	txdata, ok := tx.inner.(*DynamicFeeTx)
+	if !ok {
+		return s.EIP155Signer.SignatureValues(tx, sig)
+	}
+	// Check that chain ID of tx matches the signer. We also accept ID zero here,
+	// because it indicates that the chain ID was not specified in the tx.
+	if txdata.ChainID.Sign() != 0 && txdata.ChainID.Cmp(s.chainId) != 0 {
+		return nil, nil, nil, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, txdata.ChainID, s.chainId)
+	}
+	R, S, _ = decodeSignature(sig)
+	V = big.NewInt(int64(sig[64]))
+	return R, S, V, nil
+}
+
+// Hash returns the hash to be signed by the sender.
+// It does not uniquely identify the transaction.
+func (s EIP1559Signer) Hash(tx *Transaction) common.Hash {
+	if tx.Type() != DynamicFeeTxType {
+		return s.EIP155Signer.Hash(tx)
+	}
+	return prefixedRlpHash(
+		tx.Type(),
+		[]interface{}{
+			s.chainId,
+			tx.Nonce(),
+			tx.GasTipCap(),
+			tx.GasFeeCap(),
+			tx.Gas(),
+			tx.To(),
+			tx.Value(),
+			tx.Data(),
+			tx.AccessList(),
+		})
 }
 
 // EIP155Transaction implements Signer using the EIP155 rules.
 type EIP155Signer struct {
 	chainId, chainIdMul *big.Int
-}
-
-func (s EIP155Signer) ChainID() *big.Int {
-	return s.chainId
 }
 
 func NewEIP155Signer(chainId *big.Int) EIP155Signer {
@@ -123,6 +205,10 @@ func NewEIP155Signer(chainId *big.Int) EIP155Signer {
 		chainId:    chainId,
 		chainIdMul: new(big.Int).Mul(chainId, big.NewInt(2)),
 	}
+}
+
+func (s EIP155Signer) ChainID() *big.Int {
+	return s.chainId
 }
 
 func (s EIP155Signer) Equal(s2 Signer) bool {
@@ -148,7 +234,7 @@ func (s EIP155Signer) Sender(tx *Transaction) (common.Address, error) {
 	return recoverPlain(s.Hash(tx), R, S, V, true)
 }
 
-// WithSignature returns a new transaction with the given signature. This signature
+// SignatureValues returns a new transaction with the given signature. This signature
 // needs to be in the [R || S || V] format where V is 0 or 1.
 func (s EIP155Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
 	R, S, V, err = HomesteadSigner{}.SignatureValues(tx, sig)
@@ -176,17 +262,16 @@ func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 	})
 }
 
-// HomesteadTransaction implements TransactionInterface using the
-// homestead rules.
+// HomesteadSigner implements Signer using the homestead rules.
 type HomesteadSigner struct{ FrontierSigner }
+
+func (s HomesteadSigner) ChainID() *big.Int {
+	return nil
+}
 
 func (s HomesteadSigner) Equal(s2 Signer) bool {
 	_, ok := s2.(HomesteadSigner)
 	return ok
-}
-
-func (hs HomesteadSigner) ChainID() *big.Int {
-	return nil
 }
 
 // SignatureValues returns signature values. This signature
@@ -200,13 +285,12 @@ func (hs HomesteadSigner) Sender(tx *Transaction) (common.Address, error) {
 		return common.Address{}, ErrTxTypeNotSupported
 	}
 	v, r, s := tx.RawSignatureValues()
-
 	return recoverPlain(hs.Hash(tx), r, s, v, true)
 }
 
 type FrontierSigner struct{}
 
-func (fs FrontierSigner) ChainID() *big.Int {
+func (s FrontierSigner) ChainID() *big.Int {
 	return nil
 }
 
@@ -256,13 +340,13 @@ func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (commo
 	if !crypto.ValidateSignatureValues(V, R, S, homestead) {
 		return common.Address{}, ErrInvalidSig
 	}
-	// encode the snature in uncompressed format
+	// encode the signature in uncompressed format
 	r, s := R.Bytes(), S.Bytes()
-	sig := make([]byte, 65)
+	sig := make([]byte, crypto.SignatureLength)
 	copy(sig[32-len(r):32], r)
 	copy(sig[64-len(s):64], s)
 	sig[64] = V
-	// recover the public key from the snature
+	// recover the public key from the signature
 	pub, err := crypto.Ecrecover(sighash[:], sig)
 	if err != nil {
 		return common.Address{}, err
@@ -299,75 +383,9 @@ func CacheSigner(signer Signer, tx *Transaction) {
 	tx.from.Store(sigCache{signer: signer, from: addr})
 }
 
-type EIP1559Signer struct{ EIP155Signer }
-
-func NewEIP1559Signer(chainId *big.Int) Signer {
-	return EIP1559Signer{NewEIP155Signer(chainId)}
-}
-
-func (s EIP1559Signer) ChainID() *big.Int {
-	return s.chainId
-}
-
-func (s EIP1559Signer) Equal(s2 Signer) bool {
-	x, ok := s2.(EIP1559Signer)
-	return ok && x.chainId.Cmp(s.chainId) == 0
-}
-
-func (s EIP1559Signer) Sender(tx *Transaction) (common.Address, error) {
-	if tx.Type() != DynamicFeeTxType {
-		return s.EIP155Signer.Sender(tx)
-	}
-	V, R, S := tx.RawSignatureValues()
-	// DynamicFee txs are defined to use 0 and 1 as their recovery
-	// id, add 27 to become equivalent to unprotected Homestead signatures.
-	V = new(big.Int).Add(V, big.NewInt(27))
-	if tx.ChainId().Cmp(s.chainId) != 0 {
-		return common.Address{}, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, tx.ChainId(), s.chainId)
-	}
-	return recoverPlain(s.Hash(tx), R, S, V, true)
-}
-
-func (s EIP1559Signer) SignatureValues(tx *Transaction, sig []byte) (R, S, V *big.Int, err error) {
-	txData, ok := tx.inner.(*DynamicFeeTx)
-	if !ok {
-		return s.EIP155Signer.SignatureValues(tx, sig)
-	}
-	// Check that chain ID of tx matches the signer. We also accept ID zero here,
-	// because it indicates that the chain ID was not specified in the tx.
-	if tx.ChainId().Sign() != 0 && txData.ChainID.Cmp(s.chainId) != 0 {
-		return nil, nil, nil, fmt.Errorf("%w: have %d want %d", ErrInvalidChainId, txData.ChainID, s.chainId)
-	}
-	R, S, _ = decodeSignature(sig)
-	V = big.NewInt(int64(sig[64]))
-	return R, S, V, nil
-}
-
-// Hash returns the hash to be signed by the sender.
-// It does not uniquely identify the transaction.
-func (s EIP1559Signer) Hash(tx *Transaction) common.Hash {
-	if tx.Type() != DynamicFeeTxType {
-		return s.EIP155Signer.Hash(tx)
-	}
-	return prefixedRlpHash(
-		tx.Type(),
-		[]interface{}{
-			s.chainId,
-			tx.Nonce(),
-			tx.GasTipCap(),
-			tx.GasFeeCap(),
-			tx.Gas(),
-			tx.To(),
-			tx.Value(),
-			tx.Data(),
-		})
-}
-
-var SignatureLength = 64 + 1
-
 func decodeSignature(sig []byte) (r, s, v *big.Int) {
-	if len(sig) != SignatureLength {
-		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), SignatureLength))
+	if len(sig) != crypto.SignatureLength {
+		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
 	}
 	r = new(big.Int).SetBytes(sig[:32])
 	s = new(big.Int).SetBytes(sig[32:64])

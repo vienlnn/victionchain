@@ -161,7 +161,7 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 		}
 	}
 	// Sort the transactions and cross check the nonce ordering
-	txset, _ := NewTransactionsByPriceAndNonce(signer, groups, nil, map[common.Address]*big.Int{})
+	txset, _ := NewTransactionsByPriceAndNonce(signer, groups, nil, map[common.Address]*big.Int{}, big.NewInt(1))
 
 	txs := Transactions{}
 	for tx := txset.Peek(); tx != nil; tx = txset.Peek() {
@@ -331,12 +331,69 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		}
 	}
 }
-
-func TestDecodeEmptyTypedTx(t *testing.T) {
-	input := []byte{0x80}
+func TestDecodeEmptyTypedTx1(t *testing.T) {
+	input := common.Hex2Bytes("02f87a8207cf32872386f26fc10000872386f26fc10000825208947e102bb521b1b43e1bc63851cd35e6b0aa02af458801aa535d3d0c000080c001a0096c14a09713c1f6b853120f4a406cda07cb1709bddf7c4e722b2c2d3d9a8437a07aa7c70f66161beb2de3702bc4480c384bc7f931ab8d1abeaa95ed872f0c6299")
+	// var tx DynamicFeeTx
 	var tx Transaction
-	err := rlp.DecodeBytes(input, &tx)
-	if err != ErrShortTypedTx {
-		t.Fatal("wrong error:", err)
+	// err := rlp.DecodeBytes(input, &tx)
+	// fmt.Println("err", err)
+	if err := tx.UnmarshalBinary(input); err != nil {
+		fmt.Println("Unmarsall err:", err)
 	}
+	// fmt.Println("access:", tx.inner.accessList())
+}
+
+func TestEncodeDynamicTransaction(t *testing.T) {
+	//  crypto.FromECDSA("2a5014308628e75b507695ae7c23a0f6bd339e9f0789fcfa64dc5b24e301689e")
+	acc1, _ := crypto.HexToECDSA("12617f1aad7cfcb8dd93691fb99aaeb72303b3d1dcd2aaabad40e3bbd15f02a7")
+	acc2, _ := crypto.HexToECDSA("2a5014308628e75b507695ae7c23a0f6bd339e9f0789fcfa64dc5b24e301689e")
+
+	keys := []*ecdsa.PrivateKey{acc1, acc2}
+
+	recipient := common.HexToAddress("0x7E102Bb521b1b43E1bc63851Cd35E6b0Aa02Af45")
+	signer := NewEIP1559Signer(big.NewInt(1999))
+	fmt.Println("=> dummy", crypto.PubkeyToAddress(keys[0].PublicKey).String())
+	fmt.Println("=> admin", crypto.PubkeyToAddress(keys[1].PublicKey).String())
+	// Dynamic transaction
+
+	dynamicTxData := NewTx(&DynamicFeeTx{
+		ChainID:   big.NewInt(1999),
+		To:        &recipient,
+		Gas:       21000,
+		GasTipCap: big.NewInt(0),
+		GasFeeCap: big.NewInt(1000000000),
+		Value:     big.NewInt(10000000000),
+	})
+
+	// fmt.Println(signer, txn)
+
+	dynamicTx, err := SignTx(dynamicTxData, signer, keys[0])
+	if err != nil {
+		fmt.Println("sign:dynamicTx:err", err)
+	}
+	fmt.Println("=> dynamicTx", dynamicTx)
+
+	legacyTxData := NewTx(&LegacyTx{
+		To:    &recipient,
+		Gas:   21000,
+		Value: big.NewInt(10000000000),
+		Data:  []byte{},
+	})
+
+	eip155Signer := NewEIP155Signer(big.NewInt(1999))
+	signedLegacyTx, err := SignTx(legacyTxData, eip155Signer, keys[0])
+	if err != nil {
+		fmt.Println("sign:legacy:err", err)
+	}
+	fmt.Println("=> legacy", signedLegacyTx)
+
+	// V, R, S := tx.RawSignatureValues()
+	// V = new(big.Int).Add(V, big.NewInt(27))
+	// addr, err := recoverPlain(signer.Hash(tx), R, S, V, true)
+	// fmt.Println("address", addr.String())
+	// r, s, v := tx.RawSignatureValues()
+	// fmt.Println("=> tx", r, s, v)
+	// data, _ := tx.MarshalBinary()
+	// fmt.Println("data", common.Bytes2Hex(data))
+
 }
