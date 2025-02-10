@@ -745,7 +745,7 @@ func (s TxByNonce) Less(i, j int) bool { return s[i].Nonce() < s[j].Nonce() }
 func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // txWithMinerFee wraps a transaction with its gas price or effective miner gasTipCap
-type txWithMinerFee struct {
+type TxWithMinerFee struct {
 	tx   *Transaction
 	from common.Address
 	fees *big.Int
@@ -754,7 +754,7 @@ type txWithMinerFee struct {
 // newTxWithMinerFee creates a wrapped transaction, calculating the effective
 // miner gasTipCap if a base fee is provided.
 // Returns error in case of a negative effective miner gasTipCap.
-func newTxWithMinerFee(tx *Transaction, from common.Address, baseFee *big.Int) (*txWithMinerFee, error) {
+func newTxWithMinerFee(tx *Transaction, from common.Address, baseFee *big.Int) (*TxWithMinerFee, error) {
 	tip := new(big.Int).Set(tx.GasTipCap())
 	if baseFee != nil {
 		if tx.GasFeeCap().Cmp(baseFee) < 0 {
@@ -765,7 +765,7 @@ func newTxWithMinerFee(tx *Transaction, from common.Address, baseFee *big.Int) (
 			tip = tx.GasTipCap()
 		}
 	}
-	return &txWithMinerFee{
+	return &TxWithMinerFee{
 		tx:   tx,
 		from: from,
 		fees: tip,
@@ -775,7 +775,7 @@ func newTxWithMinerFee(tx *Transaction, from common.Address, baseFee *big.Int) (
 // TxByPrice implements both the sort and the heap interface, making it useful
 // for all at once sorting as well as individually adding and removing elements.
 type TxByPrice struct {
-	txs        []*txWithMinerFee
+	txs        []*TxWithMinerFee
 	payersSwap map[common.Address]*big.Int
 }
 
@@ -800,7 +800,7 @@ func (s TxByPrice) Less(i, j int) bool {
 func (s TxByPrice) Swap(i, j int) { s.txs[i], s.txs[j] = s.txs[j], s.txs[i] }
 
 func (s *TxByPrice) Push(x interface{}) {
-	s.txs = append(s.txs, x.(*txWithMinerFee))
+	s.txs = append(s.txs, x.(*TxWithMinerFee))
 }
 
 func (s *TxByPrice) Pop() interface{} {

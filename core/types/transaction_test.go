@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/crypto"
@@ -322,6 +323,45 @@ func TestLegacyTransaction(t *testing.T) {
 	}
 }
 
+// Test transaction type EIP-1559 dynamic transaction
+func TestDynamicTransaction(t *testing.T) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	to := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	chainId := new(big.Int).SetUint64(1337)
+	signer := NewEIP1559Signer(chainId)
+
+	txdata := &DynamicFeeTx{
+		To:        &to,
+		Nonce:     1,
+		Gas:       1,
+		GasFeeCap: big.NewInt(1),
+		GasTipCap: big.NewInt(1 + 1),
+		Data:      []byte("abcdef"),
+		Value:     big.NewInt(1),
+	}
+
+	tx := NewTx(txdata)
+	txn, err := SignTx(tx, signer, key)
+
+	if err != nil {
+		t.Fatalf("could not sign transaction: %v", err)
+	}
+
+	// Make a copy of the initial V value
+	preV, _, _ := tx.RawSignatureValues()
+	preV = new(big.Int).Set(preV)
+
+	if txn.ChainId().Cmp(chainId) != 0 {
+		t.Fatalf("wrong chain id: %v", txn.ChainId())
+	}
+
+	v, _, _ := tx.RawSignatureValues()
+
+	if v.Cmp(preV) != 0 {
+		t.Fatalf("wrong v value: %v", v)
+	}
+}
+
 func TestLegacyContractCreationTransaction(t *testing.T) {
 	chainId := new(big.Int).SetUint64(1337)
 	signer := NewEIP155Signer(chainId)
@@ -337,6 +377,55 @@ func TestLegacyContractCreationTransaction(t *testing.T) {
 		t.Fatalf("could not sign transaction: %v", err)
 	}
 	fmt.Println("TestLegacyContractCreationTransaction:txn:", txn)
+}
+
+// Tests that if multiple transactions have the same price, the ones seen earlier
+// are prioritized to avoid network spam attacks aiming for a specific ordering.
+func TestTransactionTimeSort(t *testing.T) {
+	// Generate a batch of accounts to start with
+	keys := make([]*ecdsa.PrivateKey, 5)
+	for i := 0; i < len(keys); i++ {
+		keys[i], _ = crypto.GenerateKey()
+	}
+	signer := HomesteadSigner{}
+
+	// Generate a batch of transactions with overlapping prices, but different creation times
+	groups := map[common.Address]Transactions{}
+	ls := 0
+	for start, key := range keys {
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+
+		tx, _ := SignTx(NewTransaction(uint64(ls), common.Address{}, big.NewInt(100), 100, big.NewInt(1), nil), signer, key)
+		ls = ls + 1
+		tx.time = time.Unix(0, int64(len(keys)-start))
+		groups[addr] = append(groups[addr], tx)
+	}
+	txset, _ := NewTransactionsByPriceAndNonce(signer, groups, nil, map[common.Address]*big.Int{}, nil)
+
+	txs := Transactions{}
+	for tx := txset.Peek(); tx != nil; tx = txset.Peek() {
+		txs = append(txs, tx)
+		txset.Shift()
+	}
+	if len(txs) != len(keys) {
+		t.Errorf("expected %d transactions, found %d", len(keys), len(txs))
+	}
+	for i, txi := range txs {
+		fmt.Println("tx", i, txi.time, txi.inner.nonce())
+		fromi, _ := Sender(signer, txi)
+		if i+1 < len(txs) {
+			next := txs[i+1]
+			fromNext, _ := Sender(signer, next)
+
+			if txi.GasPrice().Cmp(next.GasPrice()) < 0 {
+				t.Errorf("invalid gasprice ordering: tx #%d (A=%x P=%v) < tx #%d (A=%x P=%v)", i, fromi[:4], txi.GasPrice(), i+1, fromNext[:4], next.GasPrice())
+			}
+			// Make sure time order is ascending if the txs have the same gas price
+			if txi.GasPrice().Cmp(next.GasPrice()) == 0 && txi.time.After(next.time) {
+				t.Errorf("invalid received time ordering: tx #%d (A=%x T=%v) > tx #%d (A=%x T=%v)", i, fromi[:4], txi.time, i+1, fromNext[:4], next.time)
+			}
+		}
+	}
 }
 
 func TestEIP2718TransactionEncode(t *testing.T) {
