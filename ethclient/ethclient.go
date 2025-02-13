@@ -170,38 +170,6 @@ func (ec *Client) HeaderByNumber(ctx context.Context, number *big.Int) (*types.H
 	return head, err
 }
 
-type feeHistoryResultMarshaling struct {
-	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
-	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
-	GasUsedRatio []float64        `json:"gasUsedRatio"`
-}
-
-// FeeHistory retrieves the fee market history.
-func (ec *Client) FeeHistory(ctx context.Context, blockCount uint64, lastBlock *big.Int, rewardPercentiles []float64) (*ethereum.FeeHistory, error) {
-	var res feeHistoryResultMarshaling
-	if err := ec.c.CallContext(ctx, &res, "eth_feeHistory", hexutil.Uint(blockCount), toBlockNumArg(lastBlock), rewardPercentiles); err != nil {
-		return nil, err
-	}
-	reward := make([][]*big.Int, len(res.Reward))
-	for i, r := range res.Reward {
-		reward[i] = make([]*big.Int, len(r))
-		for j, r := range r {
-			reward[i][j] = (*big.Int)(r)
-		}
-	}
-	baseFee := make([]*big.Int, len(res.BaseFee))
-	for i, b := range res.BaseFee {
-		baseFee[i] = (*big.Int)(b)
-	}
-	return &ethereum.FeeHistory{
-		OldestBlock:  (*big.Int)(res.OldestBlock),
-		Reward:       reward,
-		BaseFee:      baseFee,
-		GasUsedRatio: res.GasUsedRatio,
-	}, nil
-}
-
 type rpcTransaction struct {
 	tx *types.Transaction
 	txExtraInfo
@@ -521,8 +489,7 @@ func (ec *Client) EstimateGas(ctx context.Context, msg ethereum.CallMsg) (uint64
 // If the transaction was a contract creation use the TransactionReceipt method to get the
 // contract address after the transaction has been mined.
 func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) error {
-	fmt.Println("SendTransaction", tx)
-	data, err := tx.MarshalBinary()
+	data, err := rlp.EncodeToBytes(tx)
 	if err != nil {
 		return err
 	}

@@ -6,13 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
-	"os"
-	"path/filepath"
-	"slices"
-	"testing"
-	"time"
-
 	"github.com/stretchr/testify/require"
 	"github.com/tomochain/tomochain/accounts"
 	"github.com/tomochain/tomochain/common"
@@ -33,6 +26,12 @@ import (
 	"github.com/tomochain/tomochain/tomox"
 	"github.com/tomochain/tomochain/tomox/tradingstate"
 	"github.com/tomochain/tomochain/tomoxlending"
+	"math/big"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+	"time"
 )
 
 type testBackend struct {
@@ -40,16 +39,6 @@ type testBackend struct {
 	chain   *core.BlockChain
 	pending *types.Block
 	TomoX   *tomox.TomoX
-}
-
-// GetFeeHistory implements Backend.
-func (t *testBackend) GetFeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error) {
-	panic("unimplemented")
-}
-
-// Pending implements Backend.
-func (t *testBackend) Pending() (*types.Block, *state.StateDB) {
-	panic("unimplemented")
 }
 
 func (t testBackend) Downloader() *downloader.Downloader {
