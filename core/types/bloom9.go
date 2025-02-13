@@ -17,6 +17,7 @@
 package types
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -63,6 +64,14 @@ func (b *Bloom) Add(d *big.Int) {
 	b.SetBytes(bin.Bytes())
 }
 
+// add is internal version of Add, which takes a scratch buffer for reuse (needs to be at least 6 bytes)
+func (b *Bloom) add(d []byte, buf []byte) {
+	i1, v1, i2, v2, i3, v3 := bloomValues(d, buf)
+	b[i1] |= v1
+	b[i2] |= v2
+	b[i3] |= v3
+}
+
 // Big converts b to a big integer.
 func (b Bloom) Big() *big.Int {
 	return new(big.Int).SetBytes(b[:])
@@ -92,12 +101,17 @@ func (b *Bloom) UnmarshalText(input []byte) error {
 }
 
 func CreateBloom(receipts Receipts) Bloom {
-	bin := new(big.Int)
+	buf := make([]byte, 6)
+	var bin Bloom
 	for _, receipt := range receipts {
-		bin.Or(bin, LogsBloom(receipt.Logs))
+		for _, log := range receipt.Logs {
+			bin.add(log.Address.Bytes(), buf)
+			for _, b := range log.Topics {
+				bin.add(b[:], buf)
+			}
+		}
 	}
-
-	return BytesToBloom(bin.Bytes())
+	return bin
 }
 
 func LogsBloom(logs []*Log) *big.Int {
@@ -127,6 +141,25 @@ func bloom9(b []byte) *big.Int {
 }
 
 var Bloom9 = bloom9
+
+// bloomValues returns the bytes (index-value pairs) to set for the given data
+func bloomValues(data []byte, hashbuf []byte) (uint, byte, uint, byte, uint, byte) {
+	sha := hasherPool.Get().(crypto.KeccakState)
+	sha.Reset()
+	sha.Write(data)
+	sha.Read(hashbuf)
+	hasherPool.Put(sha)
+	// The actual bits to flip
+	v1 := byte(1 << (hashbuf[1] & 0x7))
+	v2 := byte(1 << (hashbuf[3] & 0x7))
+	v3 := byte(1 << (hashbuf[5] & 0x7))
+	// The indices for the bytes to OR in
+	i1 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf)&0x7ff)>>3) - 1
+	i2 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[2:])&0x7ff)>>3) - 1
+	i3 := BloomByteLength - uint((binary.BigEndian.Uint16(hashbuf[4:])&0x7ff)>>3) - 1
+
+	return i1, v1, i2, v2, i3, v3
+}
 
 func BloomLookup(bin Bloom, topic bytesBacked) bool {
 	bloom := bin.Big()

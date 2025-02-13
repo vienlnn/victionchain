@@ -54,7 +54,7 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		r.PostState = *dec.PostState
 	}
 	if dec.Status != nil {
-		r.Status = uint(*dec.Status)
+		r.Status = uint64(*dec.Status)
 	}
 	if dec.CumulativeGasUsed == nil {
 		return errors.New("missing required field 'cumulativeGasUsed' for Receipt")
