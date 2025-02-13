@@ -19,9 +19,10 @@ package ethapi
 
 import (
 	"context"
+	"math/big"
+
 	"github.com/tomochain/tomochain/tomox/tradingstate"
 	"github.com/tomochain/tomochain/tomoxlending"
-	"math/big"
 
 	"github.com/tomochain/tomochain/tomox"
 
@@ -95,6 +96,9 @@ type Backend interface {
 	GetBlocksHashCache(blockNr uint64) []common.Hash
 	AreTwoBlockSamePath(newBlock common.Hash, oldBlock common.Hash) bool
 	GetOrderNonce(address common.Hash) (uint64, error)
+
+	Pending() (*types.Block, *state.StateDB)
+	GetFeeHistory(ctx context.Context, blockCount uint64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*big.Int, [][]*big.Int, []*big.Int, []float64, []*big.Int, []float64, error)
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {

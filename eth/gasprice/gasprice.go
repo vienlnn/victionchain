@@ -23,7 +23,10 @@ import (
 	"sync"
 
 	"github.com/tomochain/tomochain/common"
+	"github.com/tomochain/tomochain/core"
+	"github.com/tomochain/tomochain/core/state"
 	"github.com/tomochain/tomochain/core/types"
+	"github.com/tomochain/tomochain/event"
 	"github.com/tomochain/tomochain/internal/ethapi"
 	"github.com/tomochain/tomochain/params"
 	"github.com/tomochain/tomochain/rpc"
@@ -48,6 +51,15 @@ type Oracle struct {
 
 	checkBlocks, maxEmpty, maxBlocks int
 	percentile                       int
+}
+
+type OracleBackend interface {
+	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
+	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
+	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
+	Pending() (*types.Block, types.Receipts, *state.StateDB)
+	ChainConfig() *params.ChainConfig
+	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 }
 
 // NewOracle returns a new oracle.
