@@ -677,9 +677,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, loca
 	}
 
 	// Make sure the transaction is signed properly
-	fmt.Println("tx", tx)
+	fmt.Println("=> tx::from", tx)
 	from, err := types.Sender(pool.signer, tx)
-	fmt.Println("from", from.String(), tx)
+	fmt.Println("tx::sender", from.String())
 
 	if err != nil {
 		return ErrInvalidSender
@@ -702,6 +702,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, loca
 	// Transactor should have enough funds to cover the costs
 	// cost == V + GP * GL
 	balance := pool.currentState.GetBalance(from)
+	fmt.Println("=> balance", from.String(), balance)
 	cost := tx.Cost()
 	minGasPrice := common.MinGasPrice
 	feeCapacity := big.NewInt(0)

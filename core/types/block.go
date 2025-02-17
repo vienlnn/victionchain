@@ -29,6 +29,7 @@ import (
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/common/hexutil"
+	"github.com/tomochain/tomochain/crypto"
 	"github.com/tomochain/tomochain/crypto/sha3"
 	"github.com/tomochain/tomochain/rlp"
 )
@@ -175,11 +176,12 @@ func rlpHash(x interface{}) (h common.Hash) {
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding x.
 // It's used for typed transactions.
 func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
-	hw := sha3.NewKeccak256()
-	hw.Reset()
-	hw.Write([]byte{prefix})
-	rlp.Encode(hw, x)
-	hw.Sum(h[:])
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
+	sha.Reset()
+	sha.Write([]byte{prefix})
+	rlp.Encode(sha, x)
+	sha.Read(h[:])
 	return h
 }
 

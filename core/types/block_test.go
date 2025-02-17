@@ -21,9 +21,10 @@ import (
 	"testing"
 
 	"bytes"
+	"reflect"
+
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/rlp"
-	"reflect"
 )
 
 // from bcValidBlockTest.json, "SimpleTx"

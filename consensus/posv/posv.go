@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tomochain/tomochain/consensus/misc/eip1559"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -31,6 +30,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/tomochain/tomochain/consensus/misc/eip1559"
 
 	"github.com/tomochain/tomochain/tomox/tradingstate"
 	"github.com/tomochain/tomochain/tomoxlending/lendingstate"
@@ -1154,7 +1155,7 @@ func (c *Posv) CacheData(header *types.Header, txs []*types.Transaction, receipt
 	signTxs := []*types.Transaction{}
 	for _, tx := range txs {
 		if tx.IsSigningTransaction() {
-			var b uint
+			var b uint64
 			for _, r := range receipts {
 				if r.TxHash == tx.Hash() {
 					if len(r.PostState) > 0 {
