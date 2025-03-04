@@ -18,11 +18,12 @@ package core
 
 import (
 	"crypto/ecdsa"
-	"github.com/tomochain/tomochain/core/rawdb"
 	"io/ioutil"
 	"math/big"
 	"os"
 	"testing"
+
+	"github.com/tomochain/tomochain/core/rawdb"
 
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/common/math"
@@ -41,16 +42,16 @@ func BenchmarkInsertChain_empty_diskdb(b *testing.B) {
 	benchInsertChain(b, true, nil)
 }
 func BenchmarkInsertChain_valueTx_memdb(b *testing.B) {
-	benchInsertChain(b, false, genValueTx(0))
+	benchInsertChain(b, false, genValueTxEIP1559(0))
 }
 func BenchmarkInsertChain_valueTx_diskdb(b *testing.B) {
-	benchInsertChain(b, true, genValueTx(0))
+	benchInsertChain(b, true, genValueTxEIP1559(0))
 }
 func BenchmarkInsertChain_valueTx_100kB_memdb(b *testing.B) {
-	benchInsertChain(b, false, genValueTx(100*1024))
+	benchInsertChain(b, false, genValueTxEIP1559(100*1024))
 }
 func BenchmarkInsertChain_valueTx_100kB_diskdb(b *testing.B) {
-	benchInsertChain(b, true, genValueTx(100*1024))
+	benchInsertChain(b, true, genValueTxEIP1559(100*1024))
 }
 func BenchmarkInsertChain_uncles_memdb(b *testing.B) {
 	benchInsertChain(b, false, genUncles)
@@ -59,16 +60,16 @@ func BenchmarkInsertChain_uncles_diskdb(b *testing.B) {
 	benchInsertChain(b, true, genUncles)
 }
 func BenchmarkInsertChain_ring200_memdb(b *testing.B) {
-	benchInsertChain(b, false, genTxRing(200))
+	benchInsertChain(b, false, genTxEIP1559(200))
 }
 func BenchmarkInsertChain_ring200_diskdb(b *testing.B) {
-	benchInsertChain(b, true, genTxRing(200))
+	benchInsertChain(b, true, genTxEIP1559(200))
 }
 func BenchmarkInsertChain_ring1000_memdb(b *testing.B) {
-	benchInsertChain(b, false, genTxRing(1000))
+	benchInsertChain(b, false, genTxEIP1559(1000))
 }
 func BenchmarkInsertChain_ring1000_diskdb(b *testing.B) {
-	benchInsertChain(b, true, genTxRing(1000))
+	benchInsertChain(b, true, genTxEIP1559(1000))
 }
 
 var (
@@ -87,6 +88,30 @@ func genValueTx(nbytes int) func(int, *BlockGen) {
 		data := make([]byte, nbytes)
 		gas, _ := IntrinsicGas(data, false, false)
 		tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(benchRootAddr), toaddr, big.NewInt(1), gas, nil, data), types.HomesteadSigner{}, benchRootKey)
+		gen.AddTx(tx)
+	}
+}
+
+func genValueTxEIP1559(nbytes int) func(int, *BlockGen) {
+	return func(i int, gen *BlockGen) {
+		to := common.Address{}
+		data := make([]byte, nbytes)
+		gas, _ := IntrinsicGas(data, false, false)
+		signer := types.LatestSigner(gen.config)
+		gasPrice := big.NewInt(0)
+		if gen.header.BaseFee != nil {
+			gasPrice = gen.header.BaseFee
+		}
+
+		legacyTx := types.NewTx(&types.LegacyTx{
+			Nonce:    gen.TxNonce(benchRootAddr),
+			To:       &to,
+			Value:    big.NewInt(1),
+			Gas:      gas,
+			Data:     data,
+			GasPrice: gasPrice,
+		})
+		tx, _ := types.SignTx(legacyTx, signer, benchRootKey)
 		gen.AddTx(tx)
 	}
 }
@@ -127,6 +152,47 @@ func genTxRing(naccounts int) func(int, *BlockGen) {
 				nil,
 			)
 			tx, _ = types.SignTx(tx, types.HomesteadSigner{}, ringKeys[from])
+			gen.AddTx(tx)
+			from = to
+		}
+	}
+}
+
+func genTxEIP1559(naccounts int) func(int, *BlockGen) {
+	from := 0
+	availableFunds := new(big.Int).Set(benchRootFunds)
+	return func(i int, gen *BlockGen) {
+		block := gen.PrevBlock(i - 1)
+		gas := block.GasLimit()
+		gasPrice := big.NewInt(0)
+		if gen.header.BaseFee != nil {
+			gasPrice = gen.header.BaseFee
+		}
+		signer := types.LatestSigner(gen.config)
+		for {
+			gas = gas - params.TxGas
+			if gas < params.TxGas {
+				break
+			}
+			to := (from + 1) % naccounts
+			burn := new(big.Int).SetUint64(params.TxGas)
+			burn.Mul(burn, gen.header.BaseFee)
+			availableFunds.Sub(availableFunds, burn)
+			if availableFunds.Cmp(big.NewInt(1)) < 0 {
+				panic("not enough funds")
+			}
+			legacyTx := types.NewTx(&types.LegacyTx{
+				Nonce:    gen.TxNonce(ringAddrs[from]),
+				To:       &ringAddrs[to],
+				Value:    availableFunds,
+				Gas:      params.TxGas,
+				GasPrice: gasPrice,
+			})
+
+			tx, err := types.SignTx(legacyTx, signer, ringKeys[from])
+			if err != nil {
+				panic(err)
+			}
 			gen.AddTx(tx)
 			from = to
 		}
