@@ -154,7 +154,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		msg:       msg,
 		gasPrice:  msg.GasPrice(),
 		gasFeeCap: msg.GasFeeCap(),
-		gasTipCap: msg.GasFeeCap(),
+		gasTipCap: msg.GasTipCap(),
 		value:     msg.Value(),
 		data:      msg.Data(),
 		state:     evm.StateDB,
@@ -253,13 +253,12 @@ func (st *StateTransition) preCheck() error {
 	// Make sure the sender is an EOA
 	if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
 		return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-			st.msg.From().Hex(), codeHash)
+			st.msg.From().Hex(), codeHash.String())
 	}
 
 	// Make sure that transaction gasFeeCap is greater than the baseFee (EIP-1559)
 	if st.evm.ChainConfig().IsEIP1559(st.evm.Context.BlockNumber) {
 		// Skip checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
-		fmt.Println("st.gasFeeCap", st.gasFeeCap)
 		// EVM check if !st.evm.Config.NoBaseFee || st.gasFeeCap.BitLen() > 0 || st.gasTipCap.BitLen() > 0
 		if !st.evm.Config.NoBaseFee || st.gasFeeCap.BitLen() > 0 || st.gasTipCap.BitLen() > 0 {
 			if l := st.gasFeeCap.BitLen(); l > 256 {
@@ -274,10 +273,12 @@ func (st *StateTransition) preCheck() error {
 				return fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s", ErrTipAboveFeeCap,
 					st.msg.From().Hex(), st.gasTipCap, st.gasFeeCap)
 			}
-			// Cmp with baseFee on EVM
-			// if st.gasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
-			// 	return ErrFeeCapTooLow
-			// }
+			// This will panic if baseFee is nil, but basefee presence is verified
+			// as part of header validation.
+			if st.gasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
+				return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s", ErrFeeCapTooLow,
+					st.msg.From().Hex(), st.gasFeeCap, st.evm.Context.BaseFee)
+			}
 		}
 	}
 	return st.buyGas()
@@ -287,6 +288,7 @@ func (st *StateTransition) preCheck() error {
 // returning the result including the the used gas. It returns an error if it
 // failed. An error indicates a consensus issue.
 func (st *StateTransition) TransitionDb(owner common.Address) (*ExecutionResult, error) {
+	// Check clauses 1-3, buy gas if everything is correct
 	if err := st.preCheck(); err != nil {
 		return nil, err
 	}
@@ -298,8 +300,6 @@ func (st *StateTransition) TransitionDb(owner common.Address) (*ExecutionResult,
 		contractCreation = msg.To() == nil
 	)
 
-	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	// Pay intrinsic gas
 	gas, err := IntrinsicGas(st.data, contractCreation, rules.IsHomestead)
 	if err != nil {
 		return nil, err
@@ -307,33 +307,29 @@ func (st *StateTransition) TransitionDb(owner common.Address) (*ExecutionResult,
 	if st.gas < gas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
-	// st.gas = st.gas - gas used on st.data
 	st.gas -= gas
 
-	// Check clauses 6
 	if msg.Value().Sign() > 0 && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
 		return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 	}
 
 	var (
 		ret   []byte
-		evm   = st.evm
-		vmerr error
+		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
-	// for debugging purpose
-	// TODO: clean it after fixing the issue https://github.com/tomochain/tomochain/issues/401
 	var contractAction string
 	nonce := uint64(1)
 	if contractCreation {
-		ret, _, st.gas, vmerr = evm.Create(sender, st.data, st.gas, st.value)
+		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value)
 		contractAction = "contract creation"
 	} else {
 		// Increment the nonce for the next transaction
-		nonce = st.state.GetNonce(sender.Address()) + 1
-		st.state.SetNonce(sender.Address(), nonce)
-		ret, st.gas, vmerr = evm.Call(sender, st.to().Address(), st.data, st.gas, st.value)
+		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+		ret, st.gas, vmerr = st.evm.Call(sender, st.to().Address(), st.data, st.gas, st.value)
 		contractAction = "contract call"
 	}
+	st.refundGas()
+
 	if vmerr != nil {
 		log.Debug("VM returned with error", "action", contractAction, "contract address", st.to().Address(), "gas", st.gas, "gasPrice", st.gasPrice, "nonce", nonce, "err", vmerr)
 		// The only possible consensus-error would be if there wasn't
@@ -343,11 +339,9 @@ func (st *StateTransition) TransitionDb(owner common.Address) (*ExecutionResult,
 			return nil, vmerr
 		}
 	}
-
-	st.refundGas()
-
 	effectiveTip := st.gasPrice
 	if rules.IsEIP1559 {
+		// fmt.Println("- gasTipCap", st.gasTipCap, "gasFeeCap", st.gasFeeCap, "baseFee", st.evm.Context.BaseFee)
 		effectiveTip = cmath.BigMin(st.gasTipCap, new(big.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 	}
 
@@ -361,7 +355,13 @@ func (st *StateTransition) TransitionDb(owner common.Address) (*ExecutionResult,
 				st.state.AddBalance(owner, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 			}
 		} else {
-			st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
+			fee := new(big.Int).SetUint64(st.gasUsed())
+			fee.Mul(fee, effectiveTip)
+			st.state.AddBalance(st.evm.Context.Coinbase, fee)
+			// fmt.Println("=> effectiveTip", effectiveTip)
+			// balance := st.state.GetBalance(st.evm.Coinbase)
+			// fmt.Println("=> balance::before", balance, st.evm.Coinbase.String())
+			// st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 		}
 	}
 	return &ExecutionResult{

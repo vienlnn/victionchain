@@ -25,6 +25,7 @@ import (
 	"github.com/tomochain/tomochain/common"
 	"github.com/tomochain/tomochain/consensus"
 	"github.com/tomochain/tomochain/consensus/misc"
+	"github.com/tomochain/tomochain/consensus/misc/eip1559"
 	"github.com/tomochain/tomochain/core/state"
 	"github.com/tomochain/tomochain/core/types"
 	"github.com/tomochain/tomochain/core/vm"
@@ -75,6 +76,11 @@ func (b *BlockGen) SetExtra(data []byte) {
 	b.header.Extra = data
 }
 
+// BaseFee returns the EIP-1559 base fee of the block being generated.
+func (b *BlockGen) BaseFee() *big.Int {
+	return new(big.Int).Set(b.header.BaseFee)
+}
+
 // AddTx adds a transaction to the generated block. If no coinbase has
 // been set, the block's coinbase is set to the zero address.
 //
@@ -102,13 +108,16 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 	feeCapacity := state.GetTRC21FeeCapacityFromState(b.statedb)
 	b.statedb.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
 	receipt, gas, err, tokenFeeUsed := ApplyTransaction(b.config, feeCapacity, bc, &b.header.Coinbase, b.gasPool, b.statedb, nil, b.header, tx, &b.header.GasUsed, vm.Config{})
+
 	if err != nil {
 		panic(err)
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
+
 	if tokenFeeUsed {
 		fee := new(big.Int).SetUint64(gas)
+
 		if b.header.Number.Cmp(common.TIPTRC21FeeBlock) > 0 {
 			fee = fee.Mul(fee, common.TRC21GasPrice)
 		}
@@ -262,7 +271,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.S
 		time = new(big.Int).Add(parent.Time(), big.NewInt(10)) // block time is fixed at 10 seconds
 	}
 
-	return &types.Header{
+	header := &types.Header{
 		Root:       state.IntermediateRoot(chain.Config().IsEIP158(parent.Number())),
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
@@ -276,6 +285,15 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.S
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
+	if chain.Config().IsEIP1559(header.Number) {
+		header.BaseFee = eip1559.CalcBaseFee(chain.Config(), parent.Header())
+		if !chain.Config().IsEIP1559(parent.Number()) {
+			parentGasLimit := parent.GasLimit() * chain.Config().ElasticityMultiplier()
+			header.GasLimit = CalcGasLimitEIP1559(parentGasLimit, parentGasLimit)
+		}
+	}
+
+	return header
 }
 
 // newCanonical creates a chain database, and injects a deterministic canonical
