@@ -239,6 +239,9 @@ type TxPool struct {
 	signer       types.Signer
 	mu           sync.RWMutex
 
+	// eip2718 bool // Fork indicator whether we are using EIP-2718 type transactions.
+	eip1559 bool // Fork indicator whether we are using EIP-1559 type transactions.
+
 	currentState  *state.StateDB      // Current state in the blockchain head
 	pendingState  *state.ManagedState // Pending state tracking virtual nonces
 	currentMaxGas uint64              // Current gas limit for transaction caps
@@ -252,7 +255,8 @@ type TxPool struct {
 	all     map[common.Hash]*types.Transaction // All transactions to allow lookups
 	priced  *txPricedList                      // All transactions sorted by price
 
-	wg sync.WaitGroup // for shutdown sync
+	wg         sync.WaitGroup // for shutdown sync
+	initDoneCh chan struct{}  // is closed once the pool is initialized (for tests)
 
 	homestead        bool
 	IsSigner         func(address common.Address) bool
@@ -301,6 +305,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain block
 		chainHeadCh:      make(chan ChainHeadEvent, chainHeadChanSize),
 		gasPrice:         new(big.Int).SetUint64(config.PriceLimit),
 		trc21FeeCapacity: map[common.Address]*big.Int{},
+		initDoneCh:       make(chan struct{}),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	pool.priced = newTxPricedList(&pool.all)
@@ -349,6 +354,7 @@ func (pool *TxPool) loop() {
 	head := pool.chain.CurrentBlock()
 
 	// Keep waiting for and reacting to the various events
+	close(pool.initDoneCh)
 	for {
 		select {
 		// Handle ChainHeadEvent
@@ -500,6 +506,11 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	// Check the queue and move transactions over to the pending if possible
 	// or remove those that have become invalid
 	pool.promoteExecutables(nil)
+
+	// Update all fork indicator by next pending block number.
+	next := new(big.Int).Add(newHead.Number, big.NewInt(1))
+	pool.eip1559 = pool.chainconfig.IsEIP1559(next)
+
 }
 
 // Stop terminates the transaction pool.
@@ -634,7 +645,6 @@ func (pool *TxPool) GetSender(tx *types.Transaction) (common.Address, error) {
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, local bool, opts *ValidationOptions) error {
-	// fmt.Println("txHash:", tx.Hash().String(), "txTyped:", tx.Type())
 	// Ensure transactions not implemented by the calling pool are rejected
 	if opts.Accept&(1<<tx.Type()) == 0 {
 		return fmt.Errorf("%w: tx type %v not supported by this pool", types.ErrTxTypeNotSupported, tx.Type())
@@ -652,7 +662,8 @@ func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, loca
 	if tx.Size() > common.StorageSize(opts.MaxSize) {
 		return ErrOversizedData
 	}
-	if !opts.Config.IsEIP1559(header.Number) && tx.Type() == types.DynamicFeeTxType {
+
+	if !pool.eip1559 && tx.Type() == types.DynamicFeeTxType {
 		return fmt.Errorf("%w: type %d rejected, pool not yet in EIP-1559 block", types.ErrTxTypeNotSupported, tx.Type())
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
@@ -677,9 +688,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, loca
 	}
 
 	// Make sure the transaction is signed properly
-	fmt.Println("=> tx::from", tx)
 	from, err := types.Sender(pool.signer, tx)
-	fmt.Println("tx::sender", from.String())
 
 	if err != nil {
 		return ErrInvalidSender
@@ -721,7 +730,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, header *types.Header, loca
 	if new(big.Int).Add(balance, feeCapacity).Cmp(cost) < 0 {
 		return ErrInsufficientFunds
 	}
-
 	if tx.To() == nil || (tx.To() != nil && !tx.IsSpecialTransaction()) {
 		intrGas, err := IntrinsicGas(tx.Data(), tx.To() == nil, pool.homestead)
 		if err != nil {
