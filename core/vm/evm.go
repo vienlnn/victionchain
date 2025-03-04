@@ -151,6 +151,11 @@ type EVM struct {
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(ctx Context, statedb StateDB, tradingStateDB *tradingstate.TradingStateDB, chainConfig *params.ChainConfig, vmConfig Config) *EVM {
+	if vmConfig.NoBaseFee {
+		if ctx.GasPrice.BitLen() == 0 {
+			ctx.BaseFee = big.NewInt(0)
+		}
+	}
 	evm := &EVM{
 		Context:        ctx,
 		StateDB:        statedb,
@@ -243,7 +248,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}()
 	}
 	ret, err = run(evm, contract, input, false)
-
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
