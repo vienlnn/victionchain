@@ -322,11 +322,52 @@ func (st *StateTransition) TransitionDb(owner common.Address) (ret []byte, usedG
 		}
 	}
 	if st.evm.BlockNumber.Cmp(common.TIPTRC21FeeBlock) > 0 {
+		// After TIPTRC21FeeBlock - Owner gets transaction fee
 		if (owner != common.Address{}) {
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("TRANSACTION_FEE_PAID_TO_OWNER",
+					"owner", owner.String(),
+					"owner_balance_before", st.state.GetBalance(owner),
+					"transaction_fee", transactionFee,
+					"gas_used", st.gasUsed(),
+					"gas_price", st.gasPrice)
+			}
 			st.state.AddBalance(owner, transactionFee)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				currentBalance := st.state.GetBalance(owner)
+				log.Info("OWNER_BALANCE_AFTER_FEE",
+					"owner", owner.String(),
+					"owner_balance_after", currentBalance)
+			}
+		} else {
+			// Before TIPTRC21FeeBlock - Coinbase gets transaction fee
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				currentBalance := st.state.GetBalance(st.evm.Coinbase)
+				log.Info("TRANSACTION_FEE_PAID_TO_COINBASE",
+					"coinbase", st.evm.Coinbase.String(),
+					"coinbase_balance_before", currentBalance,
+					"transaction_fee", transactionFee,
+					"gas_used", st.gasUsed(),
+					"gas_price", st.gasPrice)
+			}
+			st.state.AddBalance(st.evm.Coinbase, transactionFee)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				currentBalance := st.state.GetBalance(st.evm.Coinbase)
+				log.Info("COINBASE_BALANCE_AFTER_FEE",
+					"coinbase", st.evm.Coinbase.String(),
+					"coinbase_balance_after", currentBalance)
+			}
 		}
 	} else {
+		if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+			currentBalance := st.state.GetBalance(st.evm.Coinbase)
+			log.Info("Before TIPTRC21FeeBlock", "owner", st.evm.Coinbase.String(), "currentBalance", currentBalance, "transactionFee", transactionFee)
+		}
 		st.state.AddBalance(st.evm.Coinbase, transactionFee)
+		if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+			currentBalance := st.state.GetBalance(st.evm.Coinbase)
+			log.Info("Before TIPTRC21FeeBlock", "added", st.evm.Coinbase.String(), "currentBalance", currentBalance, "transactionFee", transactionFee, "sub", new(big.Int).Sub(currentBalance, transactionFee))
+		}
 	}
 
 	return ret, st.gasUsed(), vmerr != nil, err
@@ -340,22 +381,93 @@ func (st *StateTransition) refundGas(isUsedTokenFee bool) {
 	}
 	st.gas += refund
 
+	if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+		log.Info("GAS_REFUND_CALCULATION",
+			"isUsedTokenFee", isUsedTokenFee,
+			"gas_used", st.gasUsed(),
+			"gas_remaining", st.gas,
+			"gas_price", st.gasPrice,
+			"refund_amount", refund,
+			"to_address", st.msg.To().String())
+	}
+
 	balanceTokenFee := st.balanceTokenFee()
 	if st.evm.ChainConfig().IsAtlas(st.evm.BlockNumber) {
 		if isUsedTokenFee {
 			remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), common.TRC21GasPrice)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("TOKEN_FEE_REFUND_AFTER_ATLAS",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"token_gas_price", common.TRC21GasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining)
+			}
 			st.vrc25RefundGas(*st.msg.To(), remaining)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("TOKEN_FEE_REFUNDED_TO_CONTRACT",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"token_gas_price", common.TRC21GasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining)
+			}
 		} else if st.evm.ChainConfig().IsExperiential(st.evm.BlockNumber) {
 			from := st.from()
 			remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), st.gasPrice)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("REGULAR_GAS_REFUND_EXPERIENTIAL",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"gas_price", st.gasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining,
+					"from_address", from.Address().String(),
+					"from_balance_before", st.state.GetBalance(from.Address()))
+			}
 			st.state.AddBalance(from.Address(), remaining)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("REGULAR_GAS_REFUNDED_TO_SENDER",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"gas_price", st.gasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining,
+					"from_address", from.Address().String(),
+					"from_balance_after", st.state.GetBalance(from.Address()))
+			}
 		}
 	} else {
 		if balanceTokenFee == nil {
 			from := st.from()
-			// Return ETH for remaining gas, exchanged at the original rate.
 			remaining := new(big.Int).Mul(new(big.Int).SetUint64(st.gas), st.gasPrice)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("REGULAR_GAS_REFUND_BEFORE_ATLAS",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"gas_price", st.gasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining,
+					"from_address", from.Address().String(),
+					"from_balance_before", st.state.GetBalance(from.Address()))
+			}
 			st.state.AddBalance(from.Address(), remaining)
+			if st.msg.To().String() != "0x0000000000000000000000000000000000000089" {
+				log.Info("REGULAR_GAS_REFUNDED_TO_SENDER_BEFORE_ATLAS",
+					"isUsedTokenFee", isUsedTokenFee,
+					"gas_used", st.gasUsed(),
+					"gas_remaining", st.gas,
+					"gas_price", st.gasPrice,
+					"to_address", st.msg.To().String(),
+					"refund_value", remaining,
+					"from_address", from.Address().String(),
+					"from_balance_after", st.state.GetBalance(from.Address()))
+			}
 		}
 	}
 
