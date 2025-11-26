@@ -482,6 +482,15 @@ func ApplyTransaction(config *params.ChainConfig, tokensFee map[common.Address]*
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	fee := new(big.Int).SetUint64(gas)
 
+	// Set is sponsored transaction flag
+	if balanceFee != nil && balanceFee.Cmp(fee) > 0 {
+		receipt.IsSponsoredTx = true
+		receipt.Payer = *tx.To()
+	} else {
+		receipt.IsSponsoredTx = false
+		receipt.Payer = common.Address{}
+	}
+
 	if bc.CurrentBlock().Number().Cmp(common.TIPTRC21FeeBlock) > 0 {
 		fee = fee.Mul(fee, common.TRC21GasPrice)
 	}

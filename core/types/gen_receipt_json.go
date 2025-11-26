@@ -22,6 +22,8 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+		IsSponsoredTx     bool           `json:"isSponsoredTx"` 
+		Payer             common.Address `json:"payer"`
 	}
 	var enc Receipt
 	enc.PostState = r.PostState
@@ -32,6 +34,8 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.TxHash = r.TxHash
 	enc.ContractAddress = r.ContractAddress
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
+	enc.IsSponsoredTx = r.IsSponsoredTx 
+	enc.Payer = r.Payer
 	return json.Marshal(&enc)
 }
 
@@ -41,10 +45,12 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		Status            *hexutil.Uint   `json:"status"`
 		CumulativeGasUsed *hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
 		Bloom             *Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*Log          `json:"logs"              gencodec:"required"`
+		Logs              []*Log         `json:"logs"              gencodec:"required"`
 		TxHash            *common.Hash    `json:"transactionHash" gencodec:"required"`
 		ContractAddress   *common.Address `json:"contractAddress"`
 		GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+		IsSponsoredTx     *bool           `json:"isSponsoredTx"` 
+		Payer             *common.Address `json:"payer"`
 	}
 	var dec Receipt
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -79,5 +85,11 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		return errors.New("missing required field 'gasUsed' for Receipt")
 	}
 	r.GasUsed = uint64(*dec.GasUsed)
+	if dec.IsSponsoredTx != nil {
+		r.IsSponsoredTx = *dec.IsSponsoredTx 
+	}
+	if dec.Payer != nil {
+		r.Payer = *dec.Payer
+	}
 	return nil
 }
