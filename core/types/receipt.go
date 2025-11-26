@@ -88,6 +88,16 @@ type receiptStorageRLP struct {
 	Payer             common.Address
 }
 
+type oldReceiptStorageRLP struct {
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Bloom             Bloom
+	TxHash            common.Hash
+	ContractAddress   common.Address
+	Logs              []*LogForStorage
+	GasUsed           uint64
+}
+
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
 func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 	r := &Receipt{PostState: common.CopyBytes(root), CumulativeGasUsed: cumulativeGasUsed}
@@ -189,11 +199,56 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
 // fields of a receipt from an RLP stream.
+// Supports backward compatibility: tries new format first, falls back to old format.
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
-	var dec receiptStorageRLP
-	if err := s.Decode(&dec); err != nil {
+	// Get raw bytes first so we can try both formats
+	rawBytes, err := s.Raw()
+	if err != nil {
 		return err
 	}
+
+	// Try to decode as new format first (with IsSponsoredTx and Payer)
+	var dec receiptStorageRLP
+	newStream := rlp.NewStream(bytes.NewReader(rawBytes), 0)
+	if err := newStream.Decode(&dec); err == nil {
+		// Successfully decoded as new format
+		// Set status and assign fields
+		if err := (*Receipt)(r).setStatus(dec.PostStateOrStatus); err != nil {
+			return err
+		}
+		// Assign the consensus fields
+		r.CumulativeGasUsed, r.Bloom = dec.CumulativeGasUsed, dec.Bloom
+		r.Logs = make([]*Log, len(dec.Logs))
+		for i, log := range dec.Logs {
+			r.Logs[i] = (*Log)(log)
+		}
+		// Assign the implementation fields
+		r.TxHash, r.ContractAddress, r.GasUsed = dec.TxHash, dec.ContractAddress, dec.GasUsed
+		r.IsSponsoredTx = dec.IsSponsoredTx
+		r.Payer = dec.Payer
+		return nil
+	}
+
+	// New format failed, try old format
+	var oldDec oldReceiptStorageRLP
+	oldStream := rlp.NewStream(bytes.NewReader(rawBytes), 0)
+	if err := oldStream.Decode(&oldDec); err != nil {
+		// Both formats failed, return the original error
+		return err
+	}
+
+	// Successfully decoded as old format, convert to new format structure
+	dec = receiptStorageRLP{
+		PostStateOrStatus: oldDec.PostStateOrStatus,
+		CumulativeGasUsed: oldDec.CumulativeGasUsed,
+		Bloom:             oldDec.Bloom,
+		TxHash:            oldDec.TxHash,
+		ContractAddress:   oldDec.ContractAddress,
+		Logs:              oldDec.Logs,
+		GasUsed:           oldDec.GasUsed,
+	}
+
+	// Set status and assign fields
 	if err := (*Receipt)(r).setStatus(dec.PostStateOrStatus); err != nil {
 		return err
 	}
@@ -205,8 +260,6 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	// Assign the implementation fields
 	r.TxHash, r.ContractAddress, r.GasUsed = dec.TxHash, dec.ContractAddress, dec.GasUsed
-	r.IsSponsoredTx = dec.IsSponsoredTx
-	r.Payer = dec.Payer
 	return nil
 }
 
