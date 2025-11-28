@@ -22,8 +22,8 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		IsSponsoredTx     bool           `json:"isSponsoredTx"` 
-		Payer             common.Address `json:"payer"`
+		IsSponsoredTx     *bool          `json:"isSponsoredTx,omitempty"`
+		Payer             *common.Address `json:"payer,omitempty"`
 	}
 	var enc Receipt
 	enc.PostState = r.PostState
@@ -34,7 +34,7 @@ func (r Receipt) MarshalJSON() ([]byte, error) {
 	enc.TxHash = r.TxHash
 	enc.ContractAddress = r.ContractAddress
 	enc.GasUsed = hexutil.Uint64(r.GasUsed)
-	enc.IsSponsoredTx = r.IsSponsoredTx 
+	enc.IsSponsoredTx = r.IsSponsoredTx
 	enc.Payer = r.Payer
 	return json.Marshal(&enc)
 }
@@ -49,8 +49,8 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		TxHash            *common.Hash    `json:"transactionHash" gencodec:"required"`
 		ContractAddress   *common.Address `json:"contractAddress"`
 		GasUsed           *hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		IsSponsoredTx     *bool           `json:"isSponsoredTx"` 
-		Payer             *common.Address `json:"payer"`
+		IsSponsoredTx     *bool           `json:"isSponsoredTx,omitempty"`
+		Payer             *common.Address `json:"payer,omitempty"`
 	}
 	var dec Receipt
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -86,10 +86,10 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 	}
 	r.GasUsed = uint64(*dec.GasUsed)
 	if dec.IsSponsoredTx != nil {
-		r.IsSponsoredTx = *dec.IsSponsoredTx 
+		r.IsSponsoredTx = dec.IsSponsoredTx
 	}
 	if dec.Payer != nil {
-		r.Payer = *dec.Payer
+		r.Payer = dec.Payer
 	}
 	return nil
 }

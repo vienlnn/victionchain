@@ -1702,8 +1702,14 @@ func marshalReceipt(receipt *types.Receipt, blockHash common.Hash, blockNumber u
 		"contractAddress":   nil,
 		"logs":              receipt.Logs,
 		"logsBloom":         receipt.Bloom,
-		"isSponsoredTx":     receipt.IsSponsoredTx,
-		"payer":             receipt.Payer,
+	}
+
+	// Only include isSponsoredTx and payer if they're not nil (new receipt format)
+	if receipt.IsSponsoredTx != nil {
+		fields["isSponsoredTx"] = *receipt.IsSponsoredTx
+	}
+	if receipt.Payer != nil {
+		fields["payer"] = *receipt.Payer
 	}
 
 	// Assign receipt status or post state.

@@ -52,11 +52,11 @@ type Receipt struct {
 	Logs              []*Log `json:"logs"              gencodec:"required"`
 
 	// Implementation fields (don't reorder!)
-	TxHash          common.Hash    `json:"transactionHash" gencodec:"required"`
-	ContractAddress common.Address `json:"contractAddress"`
-	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
-	IsSponsoredTx   bool           `json:"isSponsoredTx"` // Non-consensus field for local storage
-	Payer           common.Address `json:"payer"`
+	TxHash          common.Hash     `json:"transactionHash" gencodec:"required"`
+	ContractAddress common.Address  `json:"contractAddress"`
+	GasUsed         uint64          `json:"gasUsed" gencodec:"required"`
+	IsSponsoredTx   *bool           `json:"isSponsoredTx,omitempty"` // nil = old receipt, non-nil = new receipt
+	Payer           *common.Address `json:"payer,omitempty"`         // nil = old receipt, non-nil = new receipt
 }
 
 type receiptMarshaling struct {
@@ -64,8 +64,8 @@ type receiptMarshaling struct {
 	Status            hexutil.Uint
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64
-	IsSponsoredTx     bool
-	Payer             common.Address
+	IsSponsoredTx     *bool
+	Payer             *common.Address
 }
 
 // receiptRLP is the consensus encoding of a receipt.
@@ -84,8 +84,8 @@ type receiptStorageRLP struct {
 	ContractAddress   common.Address
 	Logs              []*LogForStorage
 	GasUsed           uint64
-	IsSponsoredTx     bool
-	Payer             common.Address
+	IsSponsoredTx     *bool           // nil = old receipt, non-nil = new receipt
+	Payer             *common.Address // nil = old receipt, non-nil = new receipt
 }
 
 type oldReceiptStorageRLP struct {
@@ -180,6 +180,27 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
+	// For old receipts (nil pointers), encode without IsSponsoredTx and Payer
+	// For new receipts (non-nil pointers), include them
+	if r.IsSponsoredTx == nil && r.Payer == nil {
+		// Old receipt format - encode without IsSponsoredTx and Payer
+		oldEnc := &oldReceiptStorageRLP{
+			PostStateOrStatus: (*Receipt)(r).statusEncoding(),
+			CumulativeGasUsed: r.CumulativeGasUsed,
+			Bloom:             r.Bloom,
+			TxHash:            r.TxHash,
+			ContractAddress:   r.ContractAddress,
+			Logs:              make([]*LogForStorage, len(r.Logs)),
+			GasUsed:           r.GasUsed,
+		}
+		for i, log := range r.Logs {
+			oldEnc.Logs[i] = (*LogForStorage)(log)
+		}
+		return rlp.Encode(w, oldEnc)
+	}
+
+	// New receipt format - encode with IsSponsoredTx and Payer
+	// Both fields must be non-nil for new format
 	enc := &receiptStorageRLP{
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
@@ -246,6 +267,8 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		ContractAddress:   oldDec.ContractAddress,
 		Logs:              oldDec.Logs,
 		GasUsed:           oldDec.GasUsed,
+		IsSponsoredTx:     nil,
+		Payer:             nil,
 	}
 
 	// Set status and assign fields
@@ -260,6 +283,8 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	// Assign the implementation fields
 	r.TxHash, r.ContractAddress, r.GasUsed = dec.TxHash, dec.ContractAddress, dec.GasUsed
+	r.IsSponsoredTx = nil
+	r.Payer = nil
 	return nil
 }
 

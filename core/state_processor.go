@@ -484,11 +484,13 @@ func ApplyTransaction(config *params.ChainConfig, tokensFee map[common.Address]*
 
 	// Set is sponsored transaction flag
 	if balanceFee != nil && balanceFee.Cmp(fee) > 0 {
-		receipt.IsSponsoredTx = true
-		receipt.Payer = *tx.To()
+		isSponsored := true
+		receipt.IsSponsoredTx = &isSponsored
+		payer := *tx.To()
+		receipt.Payer = &payer
 	} else {
-		receipt.IsSponsoredTx = false
-		receipt.Payer = common.Address{}
+		receipt.IsSponsoredTx = nil
+		receipt.Payer = nil
 	}
 
 	if bc.CurrentBlock().Number().Cmp(common.TIPTRC21FeeBlock) > 0 {
